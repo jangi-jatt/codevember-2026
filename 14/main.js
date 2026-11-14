@@ -12,7 +12,9 @@ import { nativeRandom } from "modules/random.js";
 import { Parcels, TUNING, bodyDistance } from "./sim.js";
 import { loadSdf, prefetchSdf } from "./sdfAsset.js";
 import { Backdrop } from "./backdrop.js";
+import { createNoiseTexture } from "./noise.js";
 import { createSound } from "./sound.js";
+import { OrbitControls as FreeOrbitControls } from "./FreeOrbitControls.js";
 
 const BACKGROUND = 0x5f6268;
 
@@ -23,8 +25,6 @@ const FINISHES = {
   Chrome: { a: "#e8e8e8", b: "#e8e8e8", roughness: 0.08, metalness: 1, pattern: 0 },
   Spots: { a: "#2f7d6b", b: "#f3ede1", roughness: 0.3, metalness: 0, pattern: 2 },
   Latitude: { a: "#f2efe8", b: "#2b2b2b", roughness: 0.35, metalness: 0, pattern: 3 },
-  "Polka dots": { a: "#f2c230", b: "#f6f1e6", roughness: 0.3, metalness: 0, pattern: 4 },
-  Checker: { a: "#f0ece4", b: "#222222", roughness: 0.4, metalness: 0, pattern: 5 },
   "Beach ball": { a: "#f2efe8", b: "#e0402f", roughness: 0.3, metalness: 0, pattern: 6 },
   "Candy swirl": { a: "#f6f1e6", b: "#d1283a", roughness: 0.25, metalness: 0, pattern: 7 },
   Giraffe: { a: "#f1e2c2", b: "#b0612a", roughness: 0.5, metalness: 0, pattern: 8 },
@@ -66,6 +66,27 @@ function lightFrom(backdrop, lift) {
   return { envMap: target.texture, sh, direction, color };
 }
 
+// The photo's brightest region, as a direction in the backdrop's frame (its inverse mapping), from a small downsample.
+function brightestDirection(image) {
+  const W = 64, H = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = W;
+  canvas.height = H;
+  const c2d = canvas.getContext("2d", { willReadFrequently: true });
+  c2d.drawImage(image, 0, 0, W, H);
+  const px = c2d.getImageData(0, 0, W, H).data;
+  let best = -1, bx = 0, by = 0;
+  // Away from the poles, where a framing would look straight up or down.
+  for (let y = 6; y < H - 6; y++)
+    for (let x = 0; x < W; x++) {
+      const i = (y * W + x) * 4;
+      const l = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+      if (l > best) (best = l), (bx = x), (by = y);
+    }
+  const az = ((bx + 0.5) / W - 0.5) * 2 * Math.PI, el = (0.5 - (by + 0.5) / H) * Math.PI;
+  return new Vector3(Math.cos(el) * Math.sin(az), Math.sin(el), -Math.cos(el) * Math.cos(az));
+}
+
 // Each background, once fetched: its defocused backdrop and its lighting.
 const backgrounds = new Map();
 function prepareBackground(name) {
@@ -74,7 +95,7 @@ function prepareBackground(name) {
       const backdrop = new Backdrop(renderer);
       backdrop.setPhoto(photo);
       backdrop.setBlur(params.blur());
-      return { name, backdrop, env: lightFrom(backdrop, BACKGROUNDS[name].lift) };
+      return { name, backdrop, env: lightFrom(backdrop, BACKGROUNDS[name].lift), bright: brightestDirection(photo.image) };
     });
     promise.catch(() => backgrounds.delete(name));
     backgrounds.set(name, promise);
@@ -85,17 +106,19 @@ function prepareBackground(name) {
 const defaults = {
   shape: "Suzanne",
   finish: "Striped plastic",
-  film: 0.14,
+  film: 0.18,
   beads: 0,
   beadSize: 0.55,
   smooth: 0.25,
   freeBlobs: 0,
-  ior: 1.333,
+  ior: 1.2,
   steps: 160,
   spin: 0.2,
   grip: 7,
   taps: 2.5,
   tapStrength: 1,
+  drift: 1,
+  pooling: 0.6,
   background: "Module",
   blur: 1.6,
   turn: 0.02,
@@ -125,6 +148,7 @@ const pipeline = new Pipeline(renderer, {
 });
 // Phones trace the water at half resolution; their pixels are small enough that it stays sharp.
 water = new Water({ scale: pipeline.quality === "high" || pipeline.quality === "capture" ? 1 : 0.5 });
+water.uniforms.noiseTex.value = createNoiseTexture();
 
 const TRANSITION = { shape: 2.2, finish: 1.2, background: 1.6 };
 const smooth = (x) => x * x * (3 - 2 * x);
@@ -140,20 +164,24 @@ const _cB = new Vector3();
 const gui = new GUI(setDay(), document.querySelector("#gui-container"), { expanded: true });
 gui.addSelect("Shape", params.shape, Object.keys(SHAPES));
 gui.addSelect("Finish", params.finish, Object.keys(FINISHES));
-gui.addSlider("Water thickness", params.film, 0.02, 0.4, 0.005);
+// Randomizing stays where it reads as water: thinner looks like varnish, thicker like glass.
+const ranged = (controller, sig, lo, hi) => (controller.randomize = () => sig.set(+(lo + Math.random() * (hi - lo)).toFixed(3)));
+ranged(gui.addSlider("Water thickness", params.film, 0.02, 0.4, 0.005), params.film, 0.12, 0.22);
 gui.addSlider("Beads", params.beads, 0, 16, 1, { randomizable: false });
-gui.addSlider("Bead size", params.beadSize, 0.1, 0.9, 0.01);
+ranged(gui.addSlider("Bead size", params.beadSize, 0.1, 0.9, 0.01), params.beadSize, 0.3, 0.7);
 gui.addSlider("Free blobs", params.freeBlobs, 0, 4, 1, { randomizable: false });
-gui.addSlider("Smoothness", params.smooth, 0.05, 0.5, 0.01);
-gui.addSlider("IOR", params.ior, 1, 2, 0.01, { randomizable: false });
+ranged(gui.addSlider("Smoothness", params.smooth, 0.05, 0.5, 0.01), params.smooth, 0.12, 0.4);
+ranged(gui.addSlider("Pooling", params.pooling, 0, 1, 0.01), params.pooling, 0.3, 0.65);
+ranged(gui.addSlider("Drift", params.drift, 0, 2, 0.01), params.drift, 0.6, 1.4);
+ranged(gui.addSlider("IOR", params.ior, 1, 2, 0.01), params.ior, 1.1, 1.3);
 gui.addSlider("Steps", params.steps, 32, 256, 1, { randomizable: false });
-gui.addSlider("Spin", params.spin, 0, 1, 0.01, { randomizable: false });
-gui.addSlider("Grip", params.grip, 1, 20, 0.1);
-gui.addSlider("Tap strength", params.tapStrength, 0.2, 3, 0.05, { randomizable: false });
-gui.addSlider("Random taps", params.taps, 0, 8, 0.1, { randomizable: false });
+ranged(gui.addSlider("Spin", params.spin, 0, 1, 0.01), params.spin, 0.1, 0.35);
+ranged(gui.addSlider("Grip", params.grip, 1, 20, 0.1), params.grip, 5, 10);
+ranged(gui.addSlider("Tap strength", params.tapStrength, 0.2, 3, 0.05), params.tapStrength, 0.8, 1.5);
+ranged(gui.addSlider("Random taps", params.taps, 0, 8, 0.1), params.taps, 1.8, 3.5);
 gui.addSelect("Background", params.background, Object.keys(BACKGROUNDS));
-gui.addSlider("Background blur", params.blur, 0, 5, 0.1, { randomizable: false });
-gui.addSlider("Background turn", params.turn, 0, 0.2, 0.005, { randomizable: false });
+ranged(gui.addSlider("Background blur", params.blur, 0, 5, 0.1), params.blur, 0, 1.6);
+ranged(gui.addSlider("Background turn", params.turn, 0, 0.2, 0.005), params.turn, 0.01, 0.04);
 const autoChange = createAutoChange({ enabled: params.auto, every: params.autoTime, gui, ready: () => !transitioning() });
 pipeline.addGUI(gui);
 gui.addSeparator();
@@ -211,7 +239,7 @@ function resetParcels() {
   if (!shape) return;
   parcels.reset(shape, body, { count: params.beads(), size: params.beadSize(), film: coat(), free: params.freeBlobs() });
   parcelKey = [shape.name, params.beads(), params.beadSize(), params.freeBlobs()].join();
-  tendril = null;
+  tendrils.length = 0;
   waves?.reset();
   ripples.length = 0;
 }
@@ -323,6 +351,7 @@ function updateLook(dt) {
       u.morph.value = 0;
       u.heightGain.value = 1;
       commitShape(tw.to);
+      settle();
     }
   }
 
@@ -338,6 +367,7 @@ function updateLook(dt) {
     u.matMix.value = smooth(f.tween.t);
     if (f.tween.t >= 1) {
       f.shown = f.tween.to;
+      settle();
       f.tween = null;
       setFinish(FINISHES[f.shown], false);
       u.matMix.value = 0;
@@ -357,6 +387,7 @@ function updateLook(dt) {
     k = smooth(bg.tween.t);
     if (bg.tween.t >= 1) {
       bg.shown = bg.tween.to;
+      settle();
       bg.tween = null;
       k = 0;
     }
@@ -384,7 +415,15 @@ const prevOmega = new Vector3();
 const flickOmega = new Vector3();
 const _axis = new Vector3(), _dq = new Quaternion();
 
+// The body drifts slowly round the centre on a soft spring; a swipe also pushes it. The coat feels the acceleration.
+const SLOSH = { wander: 0.12, stiffness: 1.6, damping: 1.4, push: 0.3, maxPush: 1.4, gain: 0.55 };
+const bodyVel = new Vector3(), linAccel = new Vector3(), _wander = new Vector3(), _f = new Vector3();
 function moveBody(time, dt) {
+  _wander.set(Math.sin(time * 0.31 + 1.0), Math.sin(time * 0.23 + 2.0) * 0.8, Math.sin(time * 0.27 + 4.0)).multiplyScalar(SLOSH.wander * params.drift());
+  _f.copy(_wander).sub(body.position).multiplyScalar(SLOSH.stiffness * SLOSH.stiffness).addScaledVector(bodyVel, -2 * SLOSH.damping);
+  linAccel.add(_f.clone().multiplyScalar(dt));
+  bodyVel.addScaledVector(_f, dt);
+  body.position.addScaledVector(bodyVel, dt);
   _axis.set(Math.sin(time * 0.13), 1, Math.cos(time * 0.17) * 0.6).normalize();
   flickOmega.multiplyScalar(Math.exp(-dt / 2.5));
   prevOmega.copy(omega);
@@ -408,8 +447,10 @@ function inertialAt(x, y, z, nx, ny, nz) {
   const ax = w2 * rx - wr * _wo.x - (_ao.y * rz - _ao.z * ry);
   const ay = w2 * ry - wr * _wo.y - (_ao.z * rx - _ao.x * rz);
   const az = w2 * rz - wr * _wo.z - (_ao.x * ry - _ao.y * rx);
-  return ax * nx + ay * ny + az * nz;
+  // The water also lags the body's own acceleration: it piles up on the trailing side.
+  return ax * nx + ay * ny + az * nz - SLOSH.gain * (_al.x * nx + _al.y * ny + _al.z * nz);
 }
+const _al = new Vector3();
 
 // Gestures on the water. A tap kicks the coat; holding presses a dent that springs back on release; dragging over
 // the water presses a moving dent that leaves a wake; dragging off its edge pulls a tendril that necks and snaps into
@@ -474,7 +515,8 @@ function pointerOnPlane(x, y, through, out) {
 }
 
 let gesture = null;
-let tendril = null;
+// Tendrils being pulled: the pointer's, and any started by app.pull().
+const tendrils = [];
 const kicks = [];
 
 renderer.domElement.addEventListener(
@@ -483,7 +525,7 @@ renderer.domElement.addEventListener(
     if (gesture || (e.pointerType === "mouse" && e.button !== 0)) return;
     const hit = pick(e.clientX, e.clientY);
     if (!hit) return;
-    controls.enabled = false;
+    orbit.enabled = false;
     try {
       renderer.domElement.setPointerCapture(e.pointerId);
     } catch {}
@@ -501,13 +543,13 @@ function endGesture(e, cancelled) {
   if (!gesture || e.pointerId !== gesture.id) return;
   const g = gesture;
   gesture = null;
-  controls.enabled = true;
+  orbit.enabled = true;
   try {
     renderer.domElement.releasePointerCapture(e.pointerId);
   } catch {}
   if (cancelled) return;
   const duration = (performance.now() - g.t0) / 1000;
-  if (tendril && !tendril.snapped) tendril.retracting = true;
+  if (g.tendril && !g.tendril.snapped) g.tendril.retracting = true;
   if (g.moved < 8 && duration < 0.3) {
     kicks.push(g.hit);
     return;
@@ -520,6 +562,11 @@ function endGesture(e, cancelled) {
     const dw = r.clone().cross(v).divideScalar(Math.max(r.lengthSq(), 0.2)).multiplyScalar(GESTURE.flick);
     if (dw.length() > 9) dw.setLength(9);
     flickOmega.add(dw);
+    // The push: the body moves along the swipe and the water lags behind, sloshing.
+    const push = v.clone().multiplyScalar(SLOSH.push);
+    if (push.length() > SLOSH.maxPush) push.setLength(SLOSH.maxPush);
+    bodyVel.add(push);
+    linAccel.add(push);
     const spin = Math.min(1, dw.length() / 6);
     sound.shot("whoosh", { gain: 0.25 + 0.6 * spin, pan: panOf(g.start), rate: 0.9 + 0.3 * spin });
     sound.shot("swirl", { gain: 0.3 + 0.5 * spin, pan: panOf(g.start) });
@@ -555,19 +602,23 @@ function gesturePresses(dt, presses) {
     g.lastY = g.y;
   }
   sound.setLoop("slosh", 0.7 * slosh, 0.85 + 0.3 * slosh);
-  if (tendril) {
-    const stretch = Math.min(1, tendril.length / tendril.reach);
-    presses.push({ c: tendril.anchor, pressure: GESTURE.tendrilDraw * stretch, radius: GESTURE.pressRadius * 1.3 });
+  for (const t of tendrils) {
+    const stretch = Math.min(1, t.length / t.reach);
+    presses.push({ c: t.anchor, pressure: GESTURE.tendrilDraw * stretch, radius: GESTURE.pressRadius * 1.3 });
   }
 }
 
 function startTendril(g) {
-  g.tendril = true;
-  _n.copy(g.contact);
+  g.tendril = addTendril(g.contact, { gesture: g });
+}
+
+// A tendril from object-space contact c: driven by a gesture, or by script { dir (world, unit), speed (units / s) }.
+function addTendril(c, { gesture: g = null, script = null } = {}) {
+  _n.copy(c);
   shape.sdf.grad(_n.x, _n.y, _n.z, _n);
-  const anchorWorld = body.localToWorld(g.contact.clone().addScaledVector(_n, coat() / body.scale.x * 0.5));
-  tendril = {
-    anchor: g.contact.clone(),
+  const anchorWorld = body.localToWorld(c.clone().addScaledVector(_n, coat() / body.scale.x * 0.5));
+  const t = {
+    anchor: c.clone(),
     normal: _n.clone(),
     tip: anchorWorld.clone(),
     tipV: new Vector3(),
@@ -576,16 +627,25 @@ function startTendril(g) {
     snapped: false,
     retracting: false,
     gesture: g,
+    script,
+    age: 0,
   };
+  tendrils.push(t);
+  return t;
 }
 
 const _aw = new Vector3(), _target = new Vector3();
-function updateTendril(dt) {
-  const t = tendril;
-  if (!t) return;
+function updateTendrils(dt) {
+  for (let i = tendrils.length - 1; i >= 0; i--) if (updateTendril(tendrils[i], dt)) tendrils.splice(i, 1);
+}
+
+// Returns true once the tendril is gone (snapped or drawn back in).
+function updateTendril(t, dt) {
+  t.age += dt;
   _aw.copy(t.anchor).addScaledVector(t.normal, (coat() / body.scale.x) * 0.5);
   body.localToWorld(_aw);
-  if (t.retracting || t.gesture !== gesture) _target.copy(_aw);
+  if (t.script) _target.copy(_aw).addScaledVector(t.script.dir, t.script.speed * t.age);
+  else if (t.retracting || t.gesture !== gesture) _target.copy(_aw);
   else pointerOnPlane(gesture.x, gesture.y, _aw, _target);
   // The tip follows on a spring, so it lags and overshoots a little.
   _v.copy(_target).sub(t.tip).multiplyScalar(140).addScaledVector(t.tipV, -16);
@@ -604,8 +664,7 @@ function updateTendril(dt) {
   if (t.retracting && t.length < r0 * 0.5) {
     sound.shot("plop", { gain: 0.45, rate: 1.25, pan: panOf(t.tip) });
     waves.kick(t.anchor, -GESTURE.tap * 0.6, GESTURE.tapRadius * 1.4);
-    tendril = null;
-    return;
+    return true;
   }
   if (!t.retracting && t.length > t.reach) {
     // Snap: the bulb flies on as a drop, a small satellite from the neck, and the stump recoils into the coat.
@@ -616,23 +675,24 @@ function updateTendril(dt) {
     parcels.addDrop(mid, t.tipV.clone().multiplyScalar(0.12), r0 * 0.3);
     waves.kick(t.anchor, GESTURE.tap * 0.25, GESTURE.tapRadius * 1.5);
     t.snapped = true;
-    tendril = null;
+    return true;
   }
+  return false;
 }
 
 // Tendril blobs: a bulb at the tip, a neck that thins as it stretches, and a foot in the coat.
 function tendrilBlobs(out) {
-  const t = tendril;
-  if (!t) return;
   const r0 = GESTURE.tendrilRadius;
-  const s = Math.min(1, t.length / t.reach);
-  _aw.copy(t.anchor).addScaledVector(t.normal, (coat() / body.scale.x) * 0.5);
-  body.localToWorld(_aw);
-  const neck = r0 * Math.max(0.12, 0.75 - 0.6 * s);
-  out.push([_aw.clone(), r0 * 0.85]);
-  out.push([_aw.clone().lerp(t.tip, 0.35), Math.max(neck * 1.3, r0 * 0.2)]);
-  out.push([_aw.clone().lerp(t.tip, 0.68), neck]);
-  out.push([t.tip.clone(), r0 * (0.75 + 0.3 * s)]);
+  for (const t of tendrils) {
+    const s = Math.min(1, t.length / t.reach);
+    _aw.copy(t.anchor).addScaledVector(t.normal, (coat() / body.scale.x) * 0.5);
+    body.localToWorld(_aw);
+    const neck = r0 * Math.max(0.12, 0.75 - 0.6 * s);
+    out.push([_aw.clone(), r0 * 0.85]);
+    out.push([_aw.clone().lerp(t.tip, 0.35), Math.max(neck * 1.3, r0 * 0.2)]);
+    out.push([_aw.clone().lerp(t.tip, 0.68), neck]);
+    out.push([t.tip.clone(), r0 * (0.75 + 0.3 * s)]);
+  }
 }
 
 // A drop that comes back lands with a small splash, then sinks and shrinks into the coat over MERGE_TIME while its
@@ -680,9 +740,15 @@ onRandomize(() => {
 applyUrlState();
 
 camera.position.set(0, 0.4, 5.5);
-controls.target.set(0, 0, 0);
-controls.maxDistance = 8;
-controls.minDistance = 2;
+// The shared orbit locks at the poles; this one turns the camera's up with it, so the view rolls freely in zero gravity.
+controls.dispose();
+const orbit = new FreeOrbitControls(camera, renderer.domElement);
+orbit.target.set(0, 0, 0);
+// Orbiting keeps drifting after release and eases to a stop, like a camera floating free.
+orbit.enableDamping = true;
+orbit.dampingFactor = 0.04;
+orbit.maxDistance = 8;
+orbit.minDistance = 2;
 onResize((w, h, dpr) => pipeline.setSize(w, h, dpr));
 
 look.shape.target = params.shape();
@@ -707,14 +773,57 @@ window.app = {
   params,
   pipeline,
   camera,
-  controls,
+  controls: orbit,
   water,
   sound,
+  Vector3,
   parcels,
   get waves() {
     return waves;
   },
   pick,
+  // For recordings: every shape and background ready, so no change waits.
+  preload: () => Promise.all([...Object.keys(SHAPES).map((n) => prepareShape(n)), ...Object.keys(BACKGROUNDS).map((n) => prepareBackground(n))]),
+  // n tendrils pulled at once from spots facing the camera.
+  pull(n = 3) {
+    for (let k = 0; k < n; k++) {
+      for (let tries = 0; tries < 30; tries++) {
+        const i = Math.floor(nativeRandom() * waves.n);
+        _tp.fromArray(waves.pos, i * 3);
+        _tn.fromArray(waves.nor, i * 3).transformDirection(body.matrixWorld);
+        const world = body.localToWorld(_tp.clone());
+        if (_tn.dot(_eye.copy(camera.position).sub(world).normalize()) < 0.25) continue;
+        if (tendrils.some((t) => t.anchor.distanceTo(_tp) < 0.6)) continue;
+        addTendril(_tp.clone(), { script: { dir: _tn.clone(), speed: 1.4 + 0.6 * nativeRandom() } });
+        break;
+      }
+    }
+  },
+  // A push along a world direction: the body moves and turns, the water swings behind.
+  push(dir, strength = 1) {
+    const v = dir.clone().normalize().multiplyScalar(SLOSH.maxPush * strength);
+    bodyVel.add(v);
+    linAccel.add(v);
+    flickOmega.add(new Vector3(0, 0, 1).cross(v).multiplyScalar(1.2));
+    sound.shot("whoosh", { gain: 0.4 * strength, rate: 0.95 });
+    sound.shot("swirl", { gain: 0.5 * strength });
+  },
+  tapRandom(n = 1) {
+    for (let k = 0; k < n; k++) tapSomewhere(params.tapStrength() * (0.9 + 0.4 * nativeRandom()), lastTime, false);
+  },
+  // Turns the camera so the background's brightest region sits right behind the object.
+  // amount < 1 eases toward it (call every frame), so a new background swings the view round smoothly.
+  frameBright(amount = 1) {
+    const b = look.background.tween?.to ?? look.background.shown;
+    if (!b) return;
+    const d = b.bright.clone().applyMatrix3(_turn).normalize();
+    const dist = camera.position.distanceTo(orbit.target);
+    const from = orbit.target.clone().sub(camera.position).normalize();
+    const dir = from.lerp(d, amount).normalize();
+    camera.up.lerp(_eye.set(0, 1, 0), amount).normalize();
+    camera.position.copy(orbit.target).addScaledVector(dir, -dist);
+    camera.lookAt(orbit.target);
+  },
   tap: (x, y) => {
     const hit = pick(x, y);
     if (hit) kicks.push(hit);
@@ -727,20 +836,37 @@ let idle = 0;
 let nextTap = 1;
 const _tp = new Vector3(), _tn = new Vector3(), _eye = new Vector3();
 addEventListener("pointerdown", () => (idle = 0), { capture: true });
-function randomTaps(dt, time) {
-  idle += dt;
-  if (params.taps() <= 0 || gesture || tendril || idle < 3 || (nextTap -= dt) > 0) return;
-  nextTap = params.taps() * (0.4 + 1.2 * nativeRandom());
+// A tap at a random spot on the side facing the camera.
+function tapSomewhere(strength, time, quiet) {
   for (let tries = 0; tries < 24; tries++) {
     const i = Math.floor(nativeRandom() * waves.n);
     _tp.fromArray(waves.pos, i * 3);
     _tn.fromArray(waves.nor, i * 3).transformDirection(body.matrixWorld);
     body.localToWorld(_tp);
     if (_tn.dot(_eye.copy(camera.position).sub(_tp).normalize()) < 0.35) continue;
-    const size = 0.6 + 0.7 * nativeRandom();
-    tapAt(_tp.fromArray(waves.pos, i * 3).clone(), params.tapStrength() * size, time, true);
+    tapAt(_tp.fromArray(waves.pos, i * 3).clone(), strength, time, quiet);
     return;
   }
+}
+
+function randomTaps(dt, time) {
+  idle += dt;
+  // Taps queued by a finished transition: a couple of them, a moment apart, to set the new look moving.
+  for (let i = settleTaps.length - 1; i >= 0; i--)
+    if ((settleTaps[i] -= dt) <= 0) {
+      settleTaps.splice(i, 1);
+      if (!gesture && !tendrils.length) tapSomewhere(params.tapStrength() * (0.8 + 0.5 * nativeRandom()), time, false);
+    }
+  if (params.taps() <= 0 || gesture || tendrils.length || idle < 3 || (nextTap -= dt) > 0) return;
+  nextTap = params.taps() * (0.4 + 1.2 * nativeRandom());
+  tapSomewhere(params.tapStrength() * (0.6 + 0.7 * nativeRandom()), time, true);
+}
+
+const settleTaps = [];
+// Once a transition lands, two taps in different places; several landing together queue them once.
+function settle() {
+  if (settleTaps.length) return;
+  settleTaps.push(0.1, 0.45 + 0.3 * nativeRandom());
 }
 
 // A thin film can only carry small waves: taps scale down below a coat of about 0.11.
@@ -794,7 +920,9 @@ const SUBSTEPS = 4;
 const blobList = [];
 let lastSignature = "";
 
+let lastTime = 0;
 render(({ time, dt }) => {
+  lastTime = time;
   autoChange.update(dt);
   updateLook(realDt());
   turnBackground(dt);
@@ -817,7 +945,7 @@ render(({ time, dt }) => {
       moveBody(time, h);
       const centre = body.localToWorld(_c.fromArray(shape.center));
       parcels.step(h, shape, body, omega, centre, film);
-      updateTendril(h);
+      updateTendrils(h);
     }
     mergeDrops(step);
     randomTaps(step, time);
@@ -825,6 +953,9 @@ render(({ time, dt }) => {
     _iq.copy(body.quaternion).invert();
     _wo.copy(omega).applyQuaternion(_iq);
     _ao.copy(omega).sub(prevOmega).divideScalar(h).applyQuaternion(_iq);
+    // Linear acceleration over the step (velocity change / step), in the body's frame.
+    _al.copy(linAccel).divideScalar(step).applyQuaternion(_iq);
+    linAccel.set(0, 0, 0);
     inertia.cx = shape.center[0];
     inertia.cy = shape.center[1];
     inertia.cz = shape.center[2];
@@ -840,6 +971,7 @@ render(({ time, dt }) => {
   u.film.value = film + look.swell;
   u.smoothK.value = smoothness();
   u.ior.value = params.ior();
+  u.pooling.value = params.pooling();
   u.maxSteps.value = water.scale < 1 ? Math.min(params.steps(), 110) : params.steps();
 
   blobList.length = 0;
@@ -865,6 +997,6 @@ render(({ time, dt }) => {
   if (dt > 0 || signature !== lastSignature || transitioning()) pipeline.restartAccumulation(false);
   lastSignature = signature;
 
-  controls.update();
+  orbit.update();
   pipeline.render(scene, camera, time);
 });

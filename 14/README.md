@@ -12,6 +12,13 @@ splatted into a 3D texture on the GPU from a map a worker builds), tap ripple tr
 ellipsoid blobs. Rays refract in and out with Fresnel and total internal reflection, and shade the body from its field.
 The cabin is a 360° panorama, defocused (`backdrop.js`) and lifted into the environment that lights the body.
 
+The coat pools unevenly and lags the body: it drifts on a soft spring, and when pushed the water piles up on the
+trailing side and swings back. The background tumbles slowly about a wandering axis, like a camera adrift, and the
+orbit is gimbal-free (`FreeOrbitControls.js`, from genuary-2026) with inertia. The prints are all defined through space
+(stripes, spots, latitude bands, beach ball, candy swirl, giraffe, camo, coral, wood, agate, Damascus, marble), so no
+shape shows a seam; their noise comes from a small baked texture (`noise.js`), which keeps the shader quick to compile.
+When a change of look lands, the water is tapped twice to set it moving.
+
 Controls:
 
 - Tap the water for ripples; hold for a dent; drag over it to stir; drag off its edge to pull a drop; swipe to spin.

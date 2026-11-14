@@ -117,7 +117,8 @@ const renderer = new WebGLRenderer({
   antialias: !pipelineCanvas,
   depth: !pipelineCanvas,
   alpha: true,
-  preserveDrawingBuffer: false,
+  // Recordings read the canvas from their own frame callback, which may run after the buffer is cleared.
+  preserveDrawingBuffer: query.has("capture"),
 });
 renderer.outputColorSpace = SRGBColorSpace;
 renderer.toneMapping = ACESFilmicToneMapping;

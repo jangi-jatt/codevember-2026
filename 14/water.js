@@ -19,7 +19,6 @@ import {
 } from "three";
 import { globalUniforms } from "modules/pipeline/uniforms.js";
 import { shGLSL } from "modules/pipeline/studio.js";
-import { shader as simplex } from "shaders/perlinSimplex3D.js";
 
 export const MAX_BLOBS = 24;
 export const MAX_RIPPLES = 8;
@@ -67,6 +66,9 @@ uniform float rippleAmp[MAX_RIPPLES];
 uniform int rippleCount;
 uniform vec4 rippleWave;
 uniform float stepScale;
+uniform float pooling;
+// 0: the body inside the water; 1: hollow, an air pocket shaped like it; 2: solid water in its shape.
+uniform int core;
 uniform int debugView;
 // Loop bounds as uniforms, so D3D's compiler can't unroll the loops (constant bounds compiled for 20 s).
 uniform int loopOne;
@@ -113,13 +115,14 @@ uniform float objMetalness2;
 uniform int objPattern2;
 uniform float matMix;
 uniform float patternScale;
+uniform sampler3D noiseTex;
+uniform float noisePeriod;
 uniform vec3 objCentre;
 
 in vec2 vUv;
 out vec4 outColor;
 
 ${shGLSL}
-${simplex}
 
 float smin(float a, float b, float k) {
   float h = max(k - abs(a - b), 0.0) / k;
@@ -140,10 +143,23 @@ float objectSDF(vec3 p) {
   return d * bodyScale;
 }
 
+// Smooth noise in about -1..1, from the baked noise texture (noise.js).
+float tnoise(vec3 p) {
+  return textureLod(noiseTex, p / noisePeriod, 0.0).r * 3.0 - 1.5;
+}
+
+// Where the coat pools, about -1..1: smooth sine products (the noise texture is only linearly filtered, and as the
+// water's shape its kinks would refract into a grid).
+float poolField(vec3 q) {
+  vec3 p = q * 2.1;
+  return 0.55 * (sin(p.x + 1.3 * sin(p.y * 0.7)) * sin(p.y * 1.1 + 0.6) + sin(p.z * 1.3 + 2.0) * sin(p.x * 0.9 - 1.1) + 0.8 * sin(p.y * 0.8 + p.z * 0.6 + 0.5));
+}
+
 // Coat thickness at object-space q: the film, the simulated wave height, and each
 // tap's ripple train: a sharp front running out from the contact point with rings trailing behind it.
 float coat(vec3 q) {
-  float h = film + heightGain * textureLod(heightTex, (q - heightMin) / heightSize, 0.0).r;
+  // Real water never coats evenly: it pools into thicker lobes and thins between them.
+  float h = film * clamp(1.0 + pooling * poolField(q), 0.15, 2.2) + heightGain * textureLod(heightTex, (q - heightMin) / heightSize, 0.0).r;
   for (int i = 0; i < rippleCount; i++) {
     vec4 a = rippleA[i];
     float dist = length(q - a.xyz) * bodyScale;
@@ -168,6 +184,8 @@ float blobSDF(vec3 p, vec4 b, vec4 s) {
 float waterSDF(vec3 p, float so) {
   vec3 q = (bodyInv * vec4(p, 1.0)).xyz;
   float d = so - coat(q);
+  // Hollow: the body's volume is an air pocket, so the water is a shell shaped like it.
+  if (core == 1) d = max(d, -so);
   for (int i = 0; i < blobCount; i++) {
     d = smin(d, blobSDF(p, blobs[i], blobShapes[i]), smoothK);
   }
@@ -214,26 +232,17 @@ vec3 hash33(vec3 p) {
   return fract((p.xxy + p.yxx) * p.zyx);
 }
 
-float dots2(vec2 s, float w) {
-  return smoothstep(0.28 + w, 0.28 - w, length(fract(s) - 0.5));
-}
 
-float checker2(vec2 s, float w) {
-  float a = square(s.x * 0.5, w * 0.5), b = square(s.y * 0.5, w * 0.5);
-  return 0.5 - 0.5 * (1.0 - 2.0 * a) * (1.0 - 2.0 * b);
-}
-
-// The finish's print at object-space q with object-space normal n, filtered over fw (the pixel's footprint, object
-// units) so edges stay smooth.
+// The finish's print at object-space q, filtered over fw (the pixel's footprint, object units) so edges stay smooth.
+// Every print is defined through space, so any surface cuts it cleanly: no projections, no seams.
 float pattern(vec3 q, vec3 n, float fw, int pat) {
   vec3 s = q * patternScale;
   float w = fw * patternScale + 0.012;
-  // Triplanar weights, sharpened so the blends between projections stay narrow.
-  vec3 tw = pow(abs(n), vec3(6.0));
-  tw /= tw.x + tw.y + tw.z;
+  vec3 r = q - objCentre;
+  float rs = length(r) * patternScale;
   if (pat == 1) return square(s.y * 0.5, w * 0.5);
   if (pat == 2) {
-    // Spheres on a jittered lattice: any cut through a sphere is a disc.
+    // Spots: spheres on a jittered lattice; any cut through a sphere is a disc.
     vec3 c = floor(s);
     float d = 1e9;
     for (int z = -loopOne; z <= loopOne; z++)
@@ -245,14 +254,7 @@ float pattern(vec3 q, vec3 n, float fw, int pat) {
         }
     return smoothstep(0.3 + w, 0.3 - w, d);
   }
-  if (pat == 3) {
-    vec3 r = q - objCentre;
-    return square(atan(length(r.xz), r.y) / 3.14159265 * patternScale * 1.5, w * 0.5);
-  }
-  if (pat == 4) return tw.x * dots2(s.yz, w) + tw.y * dots2(s.zx, w) + tw.z * dots2(s.xy, w);
-  if (pat == 5) return tw.x * checker2(s.yz, w) + tw.y * checker2(s.zx, w) + tw.z * checker2(s.xy, w);
-  vec3 r = q - objCentre;
-  float rs = length(r) * patternScale;
+  if (pat == 3) return square(atan(length(r.xz), r.y) / 3.14159265 * patternScale * 1.5, w * 0.5);
   if (pat == 6) {
     // Beach ball: wedges around the vertical axis.
     float u = (atan(r.z, r.x) / 6.2831853 + 0.5) * 6.0;
@@ -260,15 +262,18 @@ float pattern(vec3 q, vec3 n, float fw, int pat) {
     return square(u * 0.5, wa * 0.5 + 0.01);
   }
   if (pat == 7) {
-    // Candy swirl: stripes along the axis, twisted twice per turn.
-    float v = s.y * 0.35 + (atan(r.z, r.x) / 6.2831853) * 2.0;
-    return square(v, w * 0.35);
+    // Candy swirl: stripes across a plane that turns with height, so they spiral round the sides and run straight
+    // and even across the poles.
+    float a = r.y * patternScale * 0.55;
+    float v = dot(r.xz, vec2(cos(a), sin(a))) * patternScale * 0.45;
+    return square(v, w * 0.45);
   }
   if (pat == 8) {
-    // Giraffe: patches parted by the borders of 3D Voronoi cells.
-    vec3 c = s * 0.8;
+    // Giraffe: warped Voronoi patches with borders of varying width; each patch its own tone, darker at its heart.
+    vec3 c = s * 0.8 + 0.22 * vec3(tnoise(s * 0.9), tnoise(s * 0.9 + 11.0), tnoise(s * 0.9 + 23.0));
     vec3 i = floor(c);
     float f1 = 1e9, f2 = 1e9;
+    vec3 id = i;
     for (int z = -loopOne; z <= loopOne; z++)
       for (int y = -loopOne; y <= loopOne; y++)
         for (int x = -loopOne; x <= loopOne; x++) {
@@ -277,46 +282,67 @@ float pattern(vec3 q, vec3 n, float fw, int pat) {
           if (d < f1) {
             f2 = f1;
             f1 = d;
+            id = cell;
           } else f2 = min(f2, d);
         }
-    return smoothstep(0.07 - w, 0.07 + w, f2 - f1);
+    float line = 0.05 + 0.035 * (0.5 + 0.5 * tnoise(s * 1.7));
+    float inside = smoothstep(line - w, line + w, f2 - f1);
+    float tone = 0.78 + 0.22 * hash33(id).x + 0.06 * tnoise(s * 3.5);
+    return inside * clamp(tone + 0.12 * smoothstep(0.45, 0.0, f1), 0.0, 1.0);
   }
   if (pat == 9) {
-    // Camo: thresholded noise in two octaves.
-    float n = snoise(s * 0.45) + 0.5 * snoise(s * 1.1 + 7.0);
-    return smoothstep(-w, w, n - 0.05);
+    // Camo: three tones of warped blobs, flecked.
+    vec3 p = s * 0.42 + 0.35 * vec3(tnoise(s * 0.7 + 3.0), tnoise(s * 0.7 + 9.0), 0.0);
+    float a = tnoise(p) + 0.45 * tnoise(p * 2.3 + 5.0);
+    float b = tnoise(p * 1.3 + 17.0) + 0.45 * tnoise(p * 2.9 + 21.0);
+    float v = 0.5 * smoothstep(-0.05 - w, -0.05 + w, a) + 0.5 * smoothstep(0.1 - w, 0.1 + w, b);
+    return clamp(v + 0.05 * tnoise(s * 6.0), 0.0, 1.0);
   }
   if (pat == 10) {
-    // Coral: where a gyroid surface cuts the object.
-    vec3 g = s * 2.4;
-    float d = dot(sin(g), cos(g.yzx)) / 1.5;
-    return smoothstep(0.2 + 2.0 * w, 0.2 - 2.0 * w, abs(d));
+    // Coral: where a warped gyroid cuts the body, with a fainter, finer maze between its lines.
+    vec3 g = s * 2.4 + 0.5 * vec3(tnoise(s * 0.6), tnoise(s * 0.6 + 7.0), tnoise(s * 0.6 + 13.0));
+    float d = abs(dot(sin(g), cos(g.yzx)) / 1.5);
+    float width = 0.15 + 0.07 * tnoise(s * 1.3);
+    float lines = smoothstep(width + 2.0 * w, width - 2.0 * w, d);
+    vec3 g2 = g * 2.3 + 1.7;
+    float fine = smoothstep(0.12 + 4.0 * w, 0.12 - 4.0 * w, abs(dot(sin(g2), cos(g2.yzx)) / 1.5));
+    return max(lines, 0.45 * fine);
   }
   if (pat == 12) {
-    // Wood: growth rings round a log lying along x, so faces show grain; each ring darkens into its late wood.
+    // Wood: growth rings round a log lying along x, uneven in width, each darkening sharply into its late wood; fine
+    // fibres along the grain and dark pores.
     vec3 p = q - objCentre;
-    float rr = length(p.yz + 0.03 * vec2(snoise(p * 2.0), snoise(p * 2.0 + 4.0))) * patternScale * 3.5;
-    float ring = smoothstep(0.6, 0.95, fract(rr)) * (1.0 - smoothstep(0.95, 1.0, fract(rr)));
-    float fibre = 0.5 + 0.5 * snoise(vec3(p.x * 3.0, p.y * 70.0, p.z * 70.0));
-    return clamp(ring * 0.8 + fibre * 0.15, 0.0, 1.0);
+    vec2 yz = p.yz + 0.04 * vec2(tnoise(p * 1.8), tnoise(p * 1.8 + 4.0));
+    float rr = length(yz) * patternScale * 3.2 + 0.5 * tnoise(p * 1.2 + 2.0) + 0.12 * tnoise(p * 5.0);
+    float t = fract(rr);
+    float late = smoothstep(0.45, 0.9, t) * (1.0 - smoothstep(0.9, 0.97, t));
+    float fibre = tnoise(vec3(p.x * 3.0, p.y * 110.0, p.z * 110.0));
+    float pores = smoothstep(0.55, 0.85, tnoise(vec3(p.x * 8.0, p.y * 160.0, p.z * 160.0)));
+    return clamp(late * 0.85 + 0.12 * (0.5 + 0.5 * fibre) + 0.35 * pores * (1.0 - late), 0.0, 1.0);
   }
   if (pat == 13) {
-    // Agate: many concentric bands round the centre, gently wavering.
-    float d = rs * 2.6 + 0.18 * snoise(q * 1.1) + 0.05 * snoise(q * 5.0);
-    return smoothstep(0.3, 0.7, 0.5 + 0.5 * sin(d * 6.2831853));
+    // Agate: concentric bands round the centre, wavering, each layered with fine sub-bands.
+    float d = rs * 2.6 + 0.2 * tnoise(q * 1.1) + 0.05 * tnoise(q * 5.0);
+    float band = smoothstep(0.3, 0.7, 0.5 + 0.5 * sin(d * 6.2831853));
+    float fine = 0.5 + 0.5 * sin(d * 6.2831853 * 6.0 + 1.5 * tnoise(q * 3.0));
+    return clamp(band * (0.75 + 0.25 * fine) + 0.15 * fine * (1.0 - band), 0.0, 1.0);
   }
   if (pat == 14) {
-    // Damascus: thin horizontal layers, folded in broad waves.
-    float y = s.y * 2.5 + 0.9 * snoise(s * 0.22) + 0.15 * snoise(s * 0.9);
-    return smoothstep(0.3, 0.7, 0.5 + 0.5 * sin(y * 6.2831853));
+    // Damascus: thin layers folded in broad waves, a finer lamination between them.
+    float y = s.y * 2.5 + 1.4 * tnoise(s * 0.22) + 0.35 * tnoise(s * 0.9) + 0.06 * tnoise(s * 4.0);
+    float layers = smoothstep(0.35, 0.65, 0.5 + 0.5 * sin(y * 6.2831853));
+    float fine = smoothstep(0.4, 0.6, 0.5 + 0.5 * sin(y * 6.2831853 * 3.0 + 0.5));
+    return layers * 0.75 + fine * 0.25;
   }
   if (pat == 15) {
-    // Marble: soft veins along warped planes over a faint cloudy ground.
-    float n = snoise(s * 0.3) + 0.5 * snoise(s * 0.6 + 5.0) + 0.25 * snoise(s * 1.2 + 9.0);
+    // Marble: soft main veins and fine branching ones over a cloudy ground.
+    float n = tnoise(s * 0.3) + 0.5 * tnoise(s * 0.6 + 5.0) + 0.25 * tnoise(s * 1.2 + 9.0);
     float v = abs(sin((s.x * 0.5 + s.y * 0.3) * 2.2 + n * 2.0));
     float vein = pow(1.0 - smoothstep(0.0, 0.55, v), 3.0);
-    float cloud = 0.5 + 0.5 * snoise(s * 0.5 + 2.0);
-    return clamp(vein * 0.85 + 0.2 * cloud, 0.0, 1.0);
+    float v2 = abs(sin((s.y * 0.8 - s.z * 0.5) * 3.5 + n * 3.0 + 1.5 * tnoise(s * 1.7)));
+    float vein2 = pow(1.0 - smoothstep(0.0, 0.18, v2), 2.0) * 0.5;
+    float cloud = 0.13 * (0.5 + 0.5 * tnoise(s * 0.5 + 2.0)) + 0.07 * (0.5 + 0.5 * tnoise(s * 2.2));
+    return clamp(max(vein * 0.85, vein2) + cloud, 0.0, 1.0);
   }
   return 0.0;
 }
@@ -345,6 +371,8 @@ float objectAO(vec3 p, vec3 n) {
 // fw: the pixel's footprint at p (world units).
 vec3 shadeObject(vec3 p, vec3 V, float fw) {
   vec3 n = objectNormal(p);
+  // A view from behind the surface (a ray that crept round it) would turn the Fresnel into a mirror: face it.
+  if (dot(n, V) < 0.05) V = normalize(V - n * (dot(n, V) - 0.05));
   // The march stops within a tolerance of the body; shade on the surface itself so the print doesn't shift.
   p -= n * objectSDF(p);
   vec3 q = (bodyInv * vec4(p, 1.0)).xyz;
@@ -460,7 +488,7 @@ vec4 trace(vec3 o, vec3 d, float t0, float t1) {
         continue;
       }
     } else {
-      if (so < hitEps) {
+      if (core == 0 && so < hitEps) {
         throughput *= exp(-absorption * travelled);
         hitBody = true;
         break;
@@ -468,17 +496,26 @@ vec4 trace(vec3 o, vec3 d, float t0, float t1) {
       if (-w < hitEps && clear) event = 2;
       if (event == 0) {
         // A floor on the step: rays running along a thin coat would otherwise crawl; hits are snapped back to the surface.
-        float advance = max(min(-w * stepScale, so), max(0.5 * hitEps, 0.006 * bodyScale));
+        float advance = max(min(-w * stepScale, core == 0 ? so : 1e9), max(0.5 * hitEps, 0.006 * bodyScale));
         p += d * advance;
         travelled += advance;
         t += advance;
         continue;
       }
     }
-    if (++crossings > 8) break;
-    lastCross = t;
     // One normal for every crossing, so the compiler inlines the field for it once (it is slow on big shaders).
     vec3 n = waterNormal(p);
+    // A crossing only counts if the ray actually goes through the surface (in for an entry, out for an exit); a ray
+    // grazing the surface it just crossed keeps marching instead of refracting the wrong way.
+    if ((event == 1) == (dot(d, n) > 0.0)) {
+      float advance = max(abs(w), max(0.5 * hitEps, 0.006 * bodyScale));
+      p += d * advance;
+      t += advance;
+      if (inside) travelled += advance;
+      continue;
+    }
+    if (++crossings > 8) break;
+    lastCross = t;
     p -= n * w;
     if (event == 1) {
       entries++;
@@ -516,7 +553,12 @@ vec4 trace(vec3 o, vec3 d, float t0, float t1) {
     // Out of steps inside the water: the body is usually what the ray was creeping along.
     throughput *= exp(-absorption * travelled);
     // (shadeObject snaps the point onto the body.)
-    hitBody = objectSDF(p) < 2.0 * film;
+    hitBody = core == 0 && objectSDF(p) < 2.0 * film;
+    // Only a ray headed into the body lands on it, seen from the front; anything else shows what's behind.
+    if (hitBody) {
+      vec3 nb = objectNormal(p);
+      if (dot(d, nb) > -0.2) hitBody = false;
+    }
   }
   // Shaded in one place only: the compiler inlines every call.
   if (hitBody) return vec4(radiance + throughput * shadeObject(p, -d, cone * t), coverage);
@@ -565,6 +607,8 @@ export class Water {
       // speed, trailing width, wavenumber, leading width (world units)
       rippleWave: { value: new Vector4(1.1, 0.5, 17, 0.08) },
       stepScale: { value: 1 },
+      pooling: { value: 0.6 },
+      core: { value: 0 },
       debugView: { value: 0 },
       loopOne: { value: 1 },
       shadowSteps: { value: 24 },
@@ -578,7 +622,7 @@ export class Water {
       cameraPos: { value: new Vector3() },
       resolution: { value: new Vector2() },
       ior: { value: 1.333 },
-      absorption: { value: new Vector3(0.3, 0.06, 0.04) },
+      absorption: { value: new Vector3(0.12, 0.035, 0.025) },
       backdropDistance: { value: 6 },
       pano: { value: null },
       panoB: { value: null },
@@ -607,6 +651,8 @@ export class Water {
       objPattern2: { value: 0 },
       matMix: { value: 0 },
       patternScale: { value: 4 },
+      noiseTex: { value: null },
+      noisePeriod: { value: 16 },
       objCentre: { value: new Vector3() },
     };
     this.material = new RawShaderMaterial({
