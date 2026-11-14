@@ -308,8 +308,8 @@ function createNoiseVolume(size) {
 // ---------------------------------------------------------------------------
 // Shared GLSL Physical Material Library
 // ---------------------------------------------------------------------------
-// Floor reflections of the walls and the marble: the reflection ray marches the walls' distance field (capsules from
-// the maze, looked up through a CSR grid in data textures) and meets the marble analytically.
+// Floor reflections of the walls and the marble: the reflection ray is intersected with the walls' boxes (from the maze,
+// looked up through a CSR grid in data textures) and with the marble's sphere.
 const REFLECTION_GLSL = /* glsl */ `
 uniform highp sampler2D uRefCaps;
 uniform highp sampler2D uRefOffsets;

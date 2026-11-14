@@ -1,0 +1,1084 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script src="../modules/theme.js"></script><script src="../modules/page.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How Labyrinth Rolls</title>
+<meta name="description" content="How Codevember 2026 day 13, Labyrinth, carves playable marble mazes onto closed surfaces: closest-point projections, cell tilings and maze generators, a marble radius solved per maze, physics in the turning piece's frame, an auto tilt that steers by the smallest rotation, analytic floor reflections, and builds in a worker behind a slide transition.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* One reading column on a workshop grey; figures are small benches of walnut, brass and steel. */
+:root {
+  --bg: #e4e1dc;
+  --panel: #eeebe6;
+  --ink: #1a1917;
+  --muted: #5b5751;
+  --line: #c9c3ba;
+  --accent: #9c5a1c;
+  --accent2: #36657d;
+  --stage: #dbd7d0;
+  --stage-ink: #857e75;
+  --floor: #c9b49a;
+  --wall: #6e5a3f;
+  --marble: #b3202f;
+  --thread: #c08a2a;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Literata", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121211; --panel: #1b1a19; --ink: #ece8e2; --muted: #a29d96; --line: #34312d;
+    --accent: #e09a5a; --accent2: #7db4d2; --stage: #0c0c0b; --stage-ink: #857e75;
+    --floor: #4a3a2a; --wall: #d2b07a; --marble: #e2474f; --thread: #e2b04a;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121211; --panel: #1b1a19; --ink: #ece8e2; --muted: #a29d96; --line: #34312d;
+  --accent: #e09a5a; --accent2: #7db4d2; --stage: #0c0c0b; --stage-ink: #857e75;
+  --floor: #4a3a2a; --wall: #d2b07a; --marble: #e2474f; --thread: #e2b04a;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font: 400 17px/1.62 var(--body); margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+main { max-width: 1060px; margin: 0 auto; display: flex; flex-direction: column; gap: 72px; }
+.col { max-width: 680px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.05; }
+h1 { font-weight: 800; font-size: clamp(44px, 9vw, 104px); letter-spacing: -0.035em; }
+h2 { font-weight: 700; font-size: clamp(28px, 4.4vw, 42px); letter-spacing: -0.02em; }
+h3 { font-weight: 700; font-size: 19px; letter-spacing: -0.005em; }
+p { margin: 0; }
+.prose { display: flex; flex-direction: column; gap: 16px; }
+.eyebrow { font: 600 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.eyebrow b { color: var(--accent); font-weight: 600; }
+code, .mono { font-family: var(--mono); font-size: 0.84em; }
+code { background: color-mix(in srgb, var(--ink) 7%, transparent); padding: 0.08em 0.35em; border-radius: 3px; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+section { display: flex; flex-direction: column; gap: 24px; }
+
+/* Hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 40px; align-items: end; padding-top: 48px; }
+.hero .lede { font-size: 20px; line-height: 1.5; max-width: 34ch; }
+.hero-text { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.hero h1 .holo { color: var(--accent); }
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .hero h1 .holo {
+    background: linear-gradient(100deg, var(--accent) 10%, var(--accent2) 95%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+}
+.hero figure { margin: 0; position: relative; }
+.hero img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: 2px; background: var(--stage); }
+.hero figcaption { font: 400 12px/1.4 var(--mono); color: var(--muted); margin-top: 8px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font: 400 13px/1.3 var(--mono); color: var(--muted); }
+.meta span b { color: var(--ink); font-weight: 600; }
+
+/* Figures */
+.fig { background: var(--panel); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.fig-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; align-items: baseline; }
+.fig-cap { font-size: 14.5px; line-height: 1.5; color: var(--muted); max-width: 70ch; }
+.fig canvas { display: block; width: 100%; max-width: 100%; touch-action: pan-y; border-radius: 3px; background: var(--stage); }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; font: 400 13px/1.2 var(--mono); color: var(--muted); }
+.controls label { display: flex; gap: 10px; align-items: center; }
+.controls output { color: var(--ink); min-width: 3ch; font-variant-numeric: tabular-nums; }
+input[type="range"] { accent-color: var(--accent); width: 130px; }
+input[type="checkbox"] { accent-color: var(--accent); }
+select {
+  font: 400 13px/1.2 var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 3px; padding: 6px 8px;
+}
+button {
+  font: 600 13px/1 var(--mono); color: var(--bg); background: var(--ink); border: 0; border-radius: 3px;
+  padding: 9px 14px; cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.readout { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 400 13px/1.3 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--ink); font-weight: 600; }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.fact { background: var(--panel); border-radius: 4px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fact b { font: 700 15px/1.2 var(--display); }
+.fact span { font-size: 14px; line-height: 1.45; color: var(--muted); }
+.fact code { font-size: 12.5px; }
+.formula { font: 400 14px/1.6 var(--mono); background: var(--panel); border-radius: 4px; padding: 14px 16px; overflow-x: auto; white-space: nowrap; }
+.formula .c { color: var(--muted); }
+.keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 24px; font-size: 15px; line-height: 1.45; margin: 0; padding: 0; list-style: none; }
+.keys li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.keys b { font: 600 13px/1 var(--mono); }
+footer { font: 400 13px/1.6 var(--mono); color: var(--muted); border-top: 1px solid var(--line); padding-top: 20px; }
+
+@media (max-width: 760px) {
+  .hero { grid-template-columns: minmax(0, 1fr); padding-top: 28px; gap: 28px; }
+  .fig { padding: 16px; }
+  main { gap: 56px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <div class="hero-text">
+      <div class="eyebrow"><a href="../">Codevember 2026</a> · <b>Day 13</b> · Labyrinth</div>
+      <h1>How Labyrinth <span class="holo">rolls</span></h1>
+      <p class="lede">A marble maze carved all the way round a closed form: a sphere, a torus, a rounded polyhedron, a knot. You turn the piece in your hands and the marble rolls through channels that run underneath and through the hole. Here is how the surfaces, mazes and walls are built, how the marble moves, how the piece steers itself, and how one labyrinth hands over to the next.</p>
+      <a class="live" href="./">See it live <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M3 1.8v8.4c0 .5.5.8.9.5l6.6-4.2a.6.6 0 0 0 0-1L3.9 1.3c-.4-.3-.9 0-.9.5z" fill="currentColor"/></svg></a>
+    </div>
+    <figure>
+      <img src="../screenshots/13.jpg" width="1080" height="1080" alt="A rounded dodecahedron in black carbon fibre, covered in a maze of polished titanium walls, with a small red marble at the top edge, on a grey studio backdrop." fetchpriority="high" decoding="async">
+      <figcaption>Carbon fibre and titanium on a rounded dodecahedron, with a ruby marble.</figcaption>
+    </figure>
+  </header>
+
+  <!-- 1. The idea -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The idea</div>
+      <h2>A tilt maze with no board</h2>
+      <p>Day 13's prompt was Labyrinth. The piece is the wooden toy where you tilt a board to roll a ball bearing past the holes, with the board closed up into a solid: fourteen forms, from a sphere and a torus to rounded polyhedra, a pebble, a pillow and a trefoil knot. The corridors run all the way round. The marble is held to the floor rather than resting on it, so it follows a passage under the bottom or through the hole of the torus, and gravity, which never moves, decides which way it rolls.</p>
+      <p>You drag to turn the piece; the camera stays put. Left alone for two seconds, the piece starts steering itself, turning so that the floor under the marble slopes gently toward the way out. When the marble drops into the gold cup at the goal, a new labyrinth arrives. Everything renders with the <a href="../modules/pipeline/explainer.html">shared pipeline</a>, which grew an opt-in reflection hook for this day.</p>
+    </div>
+  </section>
+
+  <!-- 2. Surfaces -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Fourteen surfaces · <b>shapes.js, project, sdf</b></div>
+      <h2>Every point has a closest point</h2>
+      <p>Each shape is one function: <code>project(x, y, z)</code> returns the closest point on the surface and the normal there. Almost everything else is built on it. Tiling vertices are projected onto the surface, walls are resampled and projected so their segments follow its curve, and the marble is projected back onto it on every physics substep. Each shape also has a signed distance, used to tell when part of the piece stands between the camera and the marble.</p>
+      <p>Most of the shapes are a simple core grown by a radius, which makes the projection exact and cheap: find the closest point on the core, then step out by the radius along the direction to it. The sphere's core is a point, the torus's a circle, the capsule's a segment and the rounded cube's a smaller box. The five rounded polyhedra (icosahedron, dodecahedron, octahedron, tetrahedron and rhombic dodecahedron) are an inner solid, the intersection of its face planes, grown by a rounding ball. A point inside every face plane belongs to the nearest face. Outside, it is projected onto a face it lies beyond, and if that lands outside the solid, onto the nearest edge or corner instead.</p>
+      <p>The rest need a little iteration. The pebble is a triaxial ellipsoid, solved by finding the root of a one-dimensional Lagrange condition. The pillow is a superellipsoid, approached by Newton steps on its implicit function. The saddle ring and the trefoil are tubes round a closed curve: the closest curve parameter is found from a table of samples and refined with Newton's method, and the tube's frame is carried along the curve without twisting, with the leftover twist where the loop closes spread evenly round it. The bicone is a lathe profile with a closed-form 2D solution. Shapes with a hole (the torus, the saddle ring and the trefoil, genus 1) get their own versions of each tiling.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Closest points, in cross-section</h3>
+        <div class="controls">
+          <label>Shape <select id="pShape"><option value="sphere">sphere</option><option value="cube" selected>rounded cube</option><option value="poly">rounded polyhedron</option><option value="capsule">capsule</option><option value="torus">torus</option></select></label>
+          <label><input id="pField" type="checkbox" checked> Field</label>
+        </div>
+      </div>
+      <canvas id="projCanvas" aria-label="A cross-section of a rounded shape. A grid of points around and inside it is joined by thin lines to the closest points on its outline. Moving the pointer over the figure moves a probe point, which is joined to its own closest point, with the surface normal drawn there."></canvas>
+      <div class="readout" id="pOut"></div>
+      <p class="fig-cap">Slices through the shapes' centres, using the same rule as the day's projections: closest point on the core (dashed), then out by the rounding radius. Move the pointer over the figure to move the probe. Points inside the core of a polyhedron go to the nearest face.</p>
+    </div>
+  </section>
+
+  <!-- 3. Cells and mazes -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Cells and mazes · <b>maze.js, build*Tiling, generateMazePassages</b></div>
+      <h2>Six tilings, four ways to carve</h2>
+      <p>A maze needs rooms. The surface is first cut into cells, by one of six tilings, with Density setting how many. <b>Polyhedral</b> follows the form itself: subdivided triangles on the icosahedron, octahedron and tetrahedron, kites on the dodecahedron, diamonds on the rhombic dodecahedron, quads from a cube projected onto the round shapes, and a grid of rings along the tubes. <b>Triangular</b> and <b>hexagonal</b> use a subdivided icosahedron and its dual (Goldberg-style hexagons with a few pentagons) on closed shapes, and staggered lattices round the tubes. <b>Octagonal</b> is the 4.8.8 tiling of octagons and small diamonds. <b>Masonry</b> lays brick courses between two polar caps, or brick rings round a tube. <b>Voronoi</b> spreads seeds over a welded mesh of the surface by farthest-point sampling (distances measured along the mesh), relaxes them with Lloyd steps and collapses edges too short to pass through.</p>
+      <p>Every tiling ends as the same structure: vertices, edges and cells, each cell with its centre, normal and inradius (the largest circle that fits in it). Before carving, edges shorter than 0.78 of the median stay closed for good, since a marble wouldn't fit through, and sliver cells (under 0.4 of the average inradius) are sealed off. Each remaining cell keeps at least its widest edge.</p>
+      <p>Then one of four generators decides which walls open. <b>Backtracker</b> is a depth-first walk that prefers to keep going the way it came (a random score plus 0.38 times its alignment with the last step), so corridors are long and sweeping. <b>Kruskal</b> opens edges in random order whenever they join two separate regions, which gives many short forks and dead ends. <b>Braided</b> runs the backtracker, then opens one more wall at most dead ends, preferring a neighbour that is a dead end too, so the maze gets loops. <b>Rings</b> grows like Prim's algorithm, with a cost that is cheap along level lines of a scalar on the shape (latitude on the closed shapes, the angle round the tube on the ring shapes) and expensive across them, so it carves rings joined by occasional gates. Afterwards, any regions left apart are joined through their widest shared edge, and small dead-end cells get a second gate so the marble can't get wedged in their corners.</p>
+      <p>The start and goal sit at the two ends of the longest route. A breadth-first search from a random cell finds the farthest cell, which becomes the goal; a second search from the goal finds the farthest cell from it, the start. Only roomy cells (at least 0.56 of the average inradius) can be either, and only passages wide enough for the marble count (see below). The search from the goal also gives every cell its next step toward it, which the auto tilt uses. The route through cell centres and door midpoints is smoothed into a spline that keeps clear of the walls, and inlaid as a golden thread (Hint thread).</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>The generators, on a grid that wraps</h3>
+        <div class="controls">
+          <label>Maze <select id="mAlg"><option value="backtracker">backtracker</option><option value="kruskal">kruskal</option><option value="braided">braided</option><option value="rings">rings</option></select></label>
+          <label><input id="mSol" type="checkbox" checked> Route</label>
+          <button id="mNew" type="button" class="ghost">New maze</button>
+        </div>
+      </div>
+      <canvas id="mazeCanvas" aria-label="A grid maze whose left and right edges and top and bottom edges join, like the surface of a torus. Walls are drawn as thick strokes. A dish marks the start, a cup the goal, and a golden line traces the route between them."></canvas>
+      <div class="readout" id="mOut"></div>
+      <p class="fig-cap">The day's four rules on square cells. The grid wraps both ways, as a torus does, so like the real surfaces it has no border; Rings uses the vertical position as its scalar, the way the ring shapes use the angle round the tube. Start and goal come from the double breadth-first search.</p>
+    </div>
+  </section>
+
+  <!-- 4. Walls and the marble -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Walls, and a marble that fits · <b>maze.js, extractWallGraph*, computePassageClearanceAndHubs</b></div>
+      <h2>Sized to the narrowest door that matters</h2>
+      <p>The closed edges become walls. Walls has three styles over the same maze. <b>Original</b>, the default, keeps the tiling's own polygon edges, split into pieces under 0.036 long where the surface curves, each piece projected onto the surface. <b>Three-step</b> relaxes the wall lines, rounds their corners with Chaikin subdivision and then simplifies them, keeping sharp turns. <b>Straightened</b> straightens the corridors between walls and chamfers the octagonal tiling's corners. Each wall piece is stored as a capsule: two end points and the surface normals there, twelve floats. A 28³ grid over the piece lists, for each cell, the capsules near it, which is all the physics and the clearance checks ever look at.</p>
+      <p>The walls are extruded along a lathe-like profile: a foot sunk a little below the floor, a cove, a straight flank, a two-step bevel and a crown, with mitred corners and rounded posts at wall ends. The floor is the surface's own mesh, with a shallow dish pressed in at the start and a turned cup at the goal, and every vertex stores its distance to the nearest wall, which the finishes use for coves and worn tracks.</p>
+      <p>No marble size suits every maze. A small Voronoi tiling has narrow doors; a coarse sphere grid has wide halls. So the radius is solved for each maze. First every cell's centre moves to the point of most clearance in it, by a hill climb that only accepts steps that increase the distance to the walls. Each open door then gets a path: centre, halfway, the door's midpoint, halfway, the next centre, all on the surface. Along it the distance to the nearest wall is sampled, with each wall raised by the marble's radius along the surface normal, so it is measured at the height of the marble's centre, where a curved floor makes the gap narrower or wider than at the foot. The smallest distance along the path is the door's half-span.</p>
+      <p>The narrowest door overall would be too strict: one pinched corner would shrink the marble everywhere. Instead the doors are joined from widest to narrowest, as in Kruskal's algorithm, until 90% of the larger cells are connected; the width at which that happens is the bottleneck. If one door would pull it below 0.6 of the width that connects 70%, it is raised to that. The wall's half-width becomes at most 0.24 of the bottleneck, and the marble's radius 0.75 of the gap left beside it. The clearance depends on the radius (the walls are measured at its height), so this runs five times, blending each answer with the last. Last, the wall height follows from the marble and the cell size, the start and goal are placed within the largest region whose doors all fit the marble, and doors narrower than that are left out of the route.</p>
+    </div>
+    <div class="formula">
+      b = width at which doors, widest first, join 90% of the cells &nbsp;&nbsp;&nbsp; <span class="c">// at least 0.6 × the 70% width</span><br>
+      w = min(w<sub>base</sub>, 0.24 b) &nbsp;&nbsp;&nbsp; r = 0.75 (b − w) &nbsp;&nbsp;&nbsp; <span class="c">// repeated 5 times, since b is measured at height r</span><br>
+      route doors: half-span ≥ w + 1.04 r
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Widest first, until 90% are joined</h3>
+        <div class="controls">
+          <label>Narrow doors <input id="wN" type="range" min="0" max="0.1" step="0.005" value="0.03"><output id="wNo">3%</output></label>
+          <button id="wNew" type="button" class="ghost">New widths</button>
+        </div>
+      </div>
+      <canvas id="widthCanvas" aria-label="A wrapping grid maze drawn as its corridors, each passage between two cells drawn as a band as wide as the door. The door that sets the bottleneck is marked, the doors too narrow for the marble are drawn faint, and a marble of the solved radius sits in one cell."></canvas>
+      <div class="readout" id="wOut"></div>
+      <p class="fig-cap">Door widths here are made up, most wide and a few pinched; in the day they come from the clearance samples. A pinched door shrinks the marble only when the cells beyond it are more than a tenth of the maze (and then by no more than the 70% rule allows, marked raised); otherwise the marble keeps its size and the door stays out of the route.</p>
+    </div>
+  </section>
+
+  <!-- 5. Physics -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The marble · <b>physics.js, stepMarble</b></div>
+      <h2>Gravity turns, the marble doesn't</h2>
+      <p>The marble's state lives in the piece's own frame: a foot point on the surface, the normal there, and a velocity along it. Turning the piece doesn't move the marble in that frame, the way a ball sitting in a channel turns with the board. What changes is gravity: each frame, world down is rotated into the piece's frame by the inverse of its rotation. The piece's angular velocity and acceleration are measured from how its rotation changed, and two of the forces a turning frame adds are mixed in at a fraction of their real strength: 14% of the Euler force and 10% of the centrifugal one, enough for a flick of the wrist to throw the marble a little. There's no Coriolis term.</p>
+      <p>Each frame is split into 4 to 16 substeps, so the marble never moves more than about a quarter of its radius in one. A substep keeps only the part of the acceleration along the floor and applies 5/7 of it, the rate at which a solid sphere rolls without slipping, then loses a little speed to rolling friction. The foot moves along the velocity and is projected back onto the surface. That is the whole trick that lets the marble run round the underside: it is never off the surface long enough to fall. The velocity is then turned into the new tangent plane and rescaled to its old speed, so it doesn't bleed energy rolling over a bevel.</p>
+      <p>Walls are capsules, with both ends raised by the marble's radius along their normals, so each is a segment at the height of the marble's centre. The marble checks the capsules in its grid cell, skipping those that face the other way (the far side of a thin part, like the inside of a torus tube) or lie far off along the normal. Closer than its radius plus the wall's half-width, it is pushed out, re-projected, and loses its speed into the wall. Faster than 0.12, it bounces with the finish's restitution: 0.24 for wood, 0.31 for stone, 0.38 for metal. Slower, it rubs along the wall, which plays its own sound. The spin follows the step it actually took on the floor: about the axis across it, by its length over the radius.</p>
+      <p>The start dish is a slight dip. Near the goal the floor becomes a funnel that pulls the marble in and slows it, and the marble is caught once it is inside 0.88 of the cup's radius below a speed of 1.75, or inside 0.52 at any speed. Then it settles into the cup and a new labyrinth follows.</p>
+    </div>
+    <div class="formula">
+      g<sub>local</sub> = q<sup>−1</sup> · (0, −6.4 · gravity, 0) &nbsp;&nbsp;&nbsp; a = g<sub>local</sub> − 0.14 α × p − 0.1 ω × (ω × p) &nbsp;&nbsp;&nbsp; <span class="c">// p: foot point</span><br>
+      v += 5/7 · (a − (a · n) n) · h &nbsp;&nbsp;&nbsp; v ·= e<sup>−1.15 h</sup> &nbsp;&nbsp;&nbsp; |v| ≤ 3.2<br>
+      foot = project(foot + v h) &nbsp;&nbsp;&nbsp; v = |v| · normalize(v − (v · n′) n′) &nbsp;&nbsp;&nbsp; <span class="c">// then walls, up to 4 passes</span>
+    </div>
+  </section>
+
+  <!-- 6. Auto tilt -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Auto tilt · <b>physics.js, computeAutoTiltQuat, AUTO_PROFILES · main.js, updateRotation</b></div>
+      <h2>The smallest turn that slopes the floor</h2>
+      <p>Two seconds after the last drag or key, the piece starts steering itself, easing in over another 1.4 s. A solver picks an orientation to aim for, and the piece turns toward it with an angular velocity proportional to how far off it is, about the axis of the difference. With <b>steady</b>, the default, that velocity is capped at 1.2 rad/s and can change by at most 2 rad/s every second, so the piece never jerks, whatever the target does.</p>
+      <p>The target comes from where the marble should go. On the route to the goal it chases a point a few marble radii ahead along the smoothed path (3.5 radii for steady), which, unlike the straight line to the next door, never cuts through the wall of a curved cell. Off the route it heads for the door its cell's next step goes through, and if it strays from the path it heads back to it first. That gives an aim direction along the floor, corrected against sideways drift. Looking two or three doors ahead, the solver scores what's coming: a sharp turn, a fork, a door barely wider than the marble, or the goal. The more of it there is, the slower it wants the marble, and the flatter the floor: steady cruises at 0.2 on a slope of 0.2 rad (about 11°), and pushes the slope between −0.06 and 0.24 rad to hold that speed. If the marble stalls, the aim weaves from side to side; if four seconds pass without it getting closer to the goal, it backs up to the middle of its cell and tries again.</p>
+      <p>Then the rotation. The wanted floor normal is up, tipped by the slope toward the aim's horizontal direction. The current normal is the marble's, plus 0.3 of the normal at the point it is chasing, so the stretch ahead is levelled too; on the ring shapes it also leans toward the outside, so the marble isn't kept in the hole under the far rim. The target is the smallest rotation that takes the one onto the other. It never spends turning on a spin about the vertical, which wouldn't change the slope while the marble ran off; the code has a term for turning the marble toward the camera, but both profiles keep it at zero.</p>
+      <p>Solver offers two alternatives. <b>Optimal</b> uses the same smallest rotation with much livelier settings: a cruise speed of 0.8, slopes up to 0.54 rad (about 31°), tilting back past level to brake, and a piece that turns at up to 8 rad/s; it solves the most mazes in testing, at the cost of a restless piece. <b>Original</b>, the first version, holds a full orientation instead: the marble's normal tipped toward the camera, and its aim pointing at the camera, so the marble always rolls toward you, braking and weaving as it goes.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>A slice of the piece, steered</h3>
+        <div class="controls">
+          <label>Drive <select id="rMode"><option value="steady" selected>auto: steady</option><option value="optimal">auto: optimal</option><option value="hand">by hand</option></select></label>
+          <label>Turn <input id="rAng" type="range" min="-180" max="180" step="1" value="0" disabled><output id="rAngO">0°</output></label>
+          <button id="rReset" type="button" class="ghost">Back to start</button>
+        </div>
+      </div>
+      <canvas id="rollCanvas" aria-label="A disc, the cross-section of a sphere, with a marble rolling on its rim, a start dish, a goal cup and a wall post. An arrow shows gravity at the marble and its part along the floor. In auto mode the disc turns so the floor under the marble slopes gently toward the goal; by hand, a slider turns it, and the marble rolls round to the bottom of the disc and stays there, held to the surface."></canvas>
+      <div class="readout" id="rOut"></div>
+      <p class="fig-cap">The day's substep (5/7 of the gravity along the floor, rolling friction, the projection back onto the surface, a wood bounce off the post) and the two auto profiles' slope and speed settings, on a circle. The aim here is always onward round the circle toward the cup. By hand, the marble settles at the lowest point: underneath, upside down, held by the projection.</p>
+    </div>
+  </section>
+
+  <!-- 7. Keeping it in view -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Keeping the marble in view · <b>view.js, createViewKeeper · materials.js, createMarbleSeeThroughMaterial</b></div>
+      <h2>A camera that glides, a rim that shows through</h2>
+      <p>A closed piece hides half of itself, and the steady solver only cares about slope, so it can take the marble round the back. Three things keep it in sight. When a piece arrives, it is turned so the start faces the camera. While steady drives, a camera keeper checks whether the camera can see the marble: the marble's normal must face the camera, and 24 points along the line from it to the camera must all be outside the shape's signed distance (walls don't count). Hidden for a quarter of a second, it looks for the nearest clear view among the marble's normal and three rings of ten directions round it, 0.4, 0.8 and 1.2 rad off it, between 8° and 78° of elevation, and the visible one closest to the current view wins. The camera then glides round its orbit to it, easing out, at most 0.7 rad/s, with its speed ramped up at 1.2 rad/s² so the glide never starts with a jolt. It rechecks twice a second and leaves the camera alone for 3 s after you orbit or zoom.</p>
+      <p>And wherever the piece still covers the marble, it shows through. A sphere 5% larger than the marble is drawn after everything else with the depth test reversed, so it appears only where something is in front of it, as a soft warm rim brightest at its edge.</p>
+    </div>
+    <div class="facts">
+      <div class="fact"><b>Follow camera</b><span>C switches to a chase camera behind and above the marble, along its direction of travel, with the floor kept level. Springs that settle without overshoot smooth it, it holds through brief bounces, and on the ring shapes it ducks lower when the far side of the ring would come between it and the marble.</span></div>
+      <div class="fact"><b>Turning by hand</b><span>A drag turns the piece about the camera's up and right axes; WASD and the arrows turn it at a fixed rate. Let go and it coasts, its spin dying out at e<sup>−5.2 t</sup>. Shift-drag, right-drag, or any drag while paused orbits the camera instead.</span></div>
+      <div class="fact"><b>Contact shadow</b><span>One analytic sphere occluder, about the piece's size, darkens the backdrop under it, and follows it through a slide.</span></div>
+    </div>
+  </section>
+
+  <!-- 8. Finishes and reflections -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Finishes · <b>materials.js, FINISHES, noise.js</b></div>
+      <h2>Twelve materials from one noise volume</h2>
+      <p>Each finish pairs a floor, walls, the gold or brass rim of the cups and a marble: walnut and brass, boxwood, black enamel, travertine, verdigris bronze, porcelain and cobalt, Damascus and gold, jade and gilt, terracotta and basalt, lapis and alabaster, carbon and titanium, and yakisugi and copper. All twelve are branches of three shared shaders (floor, walls, marble) chosen by an id, so changing finish never compiles anything. Colours and roughness blend into the next finish rather than switching. Each finish also has a backdrop colour, an exposure, and an acoustic class (wood, stone or metal) that picks the rolling sounds and the bounce.</p>
+    </div>
+    <div class="facts">
+      <div class="fact"><b>One noise volume</b><span>A tileable 64³ RGBA half-float 3D texture (48³ on low-end phones) holds domain-warped fractal noise, Worley cells and Worley ridges. It is baked in the build worker while the page loads; wood rings, stone veins, crazing and patina all read from it.</span></div>
+      <div class="fact"><b>Under the glaze</b><span>Lacquer, enamel, glaze, jade, alabaster and carbon fibre look up their pattern at a depth below the surface, along the view ray refracted into it, so the pattern shifts with the view as it does under a real clear coat.</span></div>
+      <div class="fact"><b>Bumps without a map</b><span>Relief is a smooth height, turned into a normal from its screen-space derivatives (the surface-gradient method). Normal variance across the pixel is added to the roughness, so fine relief doesn't sparkle.</span></div>
+      <div class="fact"><b>Coves and wear</b><span>The floor's distance to the nearest wall darkens and roughens a cove along every wall, and polishes the middle of the corridors where a marble would run. Both fade as the walls sink.</span></div>
+    </div>
+    <div class="col prose">
+      <div class="eyebrow">Floor reflections · <b>materials.js, traceReflection, refWallHit · PipelineMaterial reflections</b></div>
+      <h2>Rays against boxes</h2>
+      <p>On polished floors the walls and the marble should be mirrored. Screen-space reflections can't do it here: the reflected walls are often off screen or behind each other. So on the high and capture tiers the floor traces its own reflection rays. The pipeline grew an opt-in <code>reflections</code> option for <code>PipelineMaterial</code>: a material that sets it provides a <code>traceReflection</code> function, and where that returns a hit it replaces the environment's reflection, by the coverage it reports.</p>
+      <p>Each floor pixel first checks whether a reflection would be visible at all: not on floors rougher than 0.55, fading out once a wall's height covers only a few pixels, and not when the Fresnel reflectance, dimmed by roughness, is too low to see. Each floor vertex knows its distance to the nearest wall, so pixels too far from any wall and from the marble stop there. The ray is in the piece's own frame, and since walls are only so tall, a steep ray is done after a short distance.</p>
+      <p>The marble is hit exactly, as a sphere. Each wall piece is a box: its length along it, its height up the surface (which follows the walls as they sink and rise) and its width across. Its four texels hold a bounding sphere, its start and length, and its two axes. The walls are listed in a 40³ grid whose cells also list the walls a short way beyond them, so the samples along a ray can be spaced wider than a cell: most rays need one lookup, never more than six. For each wall the bounding sphere comes first, a single read that rejects most of them. Then a slab test against the box, widened by a blur cone that grows with distance and with roughness, so the reflections of rough floors come out soft: how far the ray passes from the real box, mid-way through the widened one, sets how much it covers. The nearest solid hit wins, so the end of a neighbouring piece buried inside a wall never shows. The hit is lit with the studio's light and its mirror image, without the key's highlight, and fades with distance as e<sup>−t / reach</sup>, with Reflection reach in wall heights.</p>
+      <p>The first version marched the walls' distance field instead: step along the ray, look up the grid, measure the distance to every capsule listed there, repeat. Intersecting the boxes directly needs fewer grid lookups and rejects most walls with one read, and it cost about half as much, with sharper edges where the floor is glossy.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>One reflection ray, from the side</h3>
+        <div class="controls">
+          <label>Pixel <input id="fX" type="range" min="0" max="1" step="0.005" value="0.3"><output id="fXo">0.30</output></label>
+          <label>Roughness <input id="fR" type="range" min="0" max="0.6" step="0.01" value="0.18"><output id="fRo">0.18</output></label>
+          <label>Reach <input id="fH" type="range" min="0.5" max="8" step="0.1" value="1.5"><output id="fHo">1.5</output></label>
+        </div>
+      </div>
+      <canvas id="reflCanvas" aria-label="A side view of a floor with several wall boxes and a marble standing on it. A view ray from the upper left meets the floor at a pixel and reflects upward. The reflected ray is drawn with its blur cone widening along it. Walls the bounding-sphere test rejects have grey dashed circles; walls tested as boxes are outlined with their widened box, and the hit is marked."></canvas>
+      <div class="readout" id="fOut"></div>
+      <p class="fig-cap">The day's tests in 2D, in units of the wall height: the ray's span, the sphere rejection, the widened slab test, the soft coverage, and the fade (cover² · e<sup>−t / reach</sup> · 0.75 strength). In the day only the walls listed in the grid cells along the ray are tested at all.</p>
+    </div>
+  </section>
+
+  <!-- 9. Worker and transitions -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Building and changing · <b>build.worker.js, main.js, updateTransitions, updateSlide</b></div>
+      <h2>Built aside, slid in</h2>
+      <p>A labyrinth takes from a few tens of milliseconds to well over a second to build, depending on the tiling, so it is built in a worker. The main thread asks for a build by a key (seed, puzzle number, shape, cells, maze, density and walls) and the worker seeds its random numbers from that key with the same generator the page uses, so a seed always gives the same maze. The result comes back as typed arrays, transferred rather than copied. A result whose key is no longer the one wanted is dropped, so a quick series of changes never shows a stale maze.</p>
+      <p>Changes from the panel that keep the shape (Cells, Maze, Density, Walls) and a new puzzle after a solve with Auto change off are quick: the walls sink, the piece waits with its walls down until the worker answers, and the new walls rise. Randomizing, or a new shape, uses the Transition setting. <b>Slide</b>, the default, asks for the build at once and sends the piece off toward the left of the screen with its walls up and the marble still rolling, speeding up over 0.75 s until it clears the frame. The next piece, built meanwhile, comes in from the other side in its own finish, slowing to a stop over 0.75 s, start toward the camera and its marble already rolling along the first stretch of the path. The shadow camera and contact shadow follow each piece across.</p>
+      <p><b>Grow</b> keeps the strict order of earlier days: the walls sink in a wave, the piece shrinks away, and only then, out of sight, are the new values applied and the build asked for. The new piece grows in with a slight overshoot and raises its walls in a wave that starts at the goal cup, and the marble drops into the start dish. Either way, each piece only ever shows its own finish, while the backdrop and exposure blend toward the incoming finish from the moment it is known. Auto change randomizes every 25 s by default, and about a second after a solve if you aren't turning the piece.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Slide and grow, against the worker</h3>
+        <div class="controls">
+          <label>Transition <select id="tMode"><option value="slide" selected>slide</option><option value="grow">grow</option></select></label>
+          <label>Build time <input id="tB" type="range" min="0.05" max="1.6" step="0.05" value="0.6"><output id="tBo">0.60 s</output></label>
+          <button id="tGo" type="button">Change</button>
+        </div>
+      </div>
+      <canvas id="transCanvas" aria-label="Above, a stage with a round labyrinth piece seen from above in one finish's colours, its marble rolling. On Change, in slide mode, it slides off to the left while the next piece, in another finish, slides in from the right; in grow mode, its walls sink, it shrinks to nothing, and the new piece grows and raises its walls. The stage's background blends between the finishes. Below, a timeline shows each phase and when the worker's build is ready."></canvas>
+      <div class="readout" id="tOut"></div>
+      <p class="fig-cap">The day's phase timings and easings, with the finishes' base colours. Slide asks for the build when it starts, so a build shorter than the 0.75 s exit costs nothing; grow asks for it only once the old piece is gone, so the build shows as a gap.</p>
+    </div>
+  </section>
+
+  <!-- 10. Sound -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Sound · <b>sound.js</b></div>
+      <h2>Wood, stone and metal</h2>
+      <p>A looping ambient soundtrack, made by spite with Google's Lyria, plays on its own bus: it dips with a lowpass sweep as an old labyrinth leaves and comes back with the new one. Over it, foley cut from CC0 recordings on freesound.org follows the physics. A rolling loop for the finish's acoustic class rises and brightens with the marble's speed and is muffled when the marble faces away from the camera. Wall hits play knocks scaled by impact speed, a rub loop follows sliding along a wall, and every sound is panned by the marble's position on screen. There's a latch as the marble drops in at the start, a cash-register chime at the goal, swooshes on fast spins and mechanical shifts as walls sink and rise. The audio context is created on load and starts on the first gesture if the browser holds it back.</p>
+    </div>
+  </section>
+
+  <!-- 11. Controls -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Using it</div>
+      <h2>Controls</h2>
+    </div>
+    <ul class="keys col">
+      <li>Drag, or <b>WASD</b> / arrows, to turn the piece; let go and it coasts. Shift-drag or right-drag orbits the camera; scroll or pinch to zoom.</li>
+      <li><b>Shape</b>, <b>Cells</b>, <b>Maze</b> and <b>Density</b> set the labyrinth; <b>Walls</b> picks the wall style, <b>Fit size</b> scales every piece to the same outer radius.</li>
+      <li><b>Finish</b>, <b>Floor reflections</b>, <b>Reflections</b> and <b>Reflection reach</b> (high quality only) set the look.</li>
+      <li><b>Auto tilt</b> and <b>Solver</b> (steady, original, optimal) steer the piece when left alone; <b>Gravity</b> scales the pull.</li>
+      <li><b>R</b> makes a new labyrinth, by the <b>Transition</b> setting; it changes by itself every 25 s (Auto change).</li>
+      <li><b>B</b> returns the marble to the start, <b>C</b> toggles the follow camera, <b>H</b> the hint thread, <b>M</b> the sound.</li>
+      <li><b>Space</b> pauses, <b>F</b> goes fullscreen, <b>Tab</b> hides the panel, <b>P</b> saves a screenshot.</li>
+    </ul>
+  </section>
+  <footer class="col">
+    <div class="meta">
+      <span><b>three.js</b> r187</span><span>WebGL2</span><span>Web Worker</span><span>CC0 foley</span><span>no build step</span>
+    </div>
+    Day 13 of <a href="../">Codevember 2026</a> by Jaume Sanchez Elias. See it live at <a href="https://spite.github.io/codevember-2026/13/">spite.github.io/codevember-2026/13</a>; the source is in <a href="https://github.com/spite/codevember-2026/tree/main/13">13/ of the codevember-2026 repository</a>. The pieces and studio are rendered with the <a href="../modules/pipeline/explainer.html">photographic pipeline</a>. Foley is cut from CC0 recordings on freesound.org, credited in the day's README.
+  </footer>
+</main>
+
+<script>
+(() => {
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const $ = (id) => document.getElementById(id);
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  const mix = (a, b, t) => a + (b - a) * t;
+  const font = (px, w = 400) => `${w} ${px}px ${css("--mono") || "monospace"}`;
+  const deg = (r) => Math.round((r * 180) / Math.PI);
+  function mulberry(a) {
+    return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+
+  // A canvas sized to its CSS width at the device pixel ratio; draw() gets (ctx, width, height) in CSS pixels.
+  function setup(canvas, aspect, draw) {
+    const ctx = canvas.getContext("2d");
+    let lastW = -1, W = 0, H = 0;
+    const fit = (force) => {
+      if (force !== true && canvas.clientWidth === lastW) return;
+      lastW = canvas.clientWidth;
+      W = canvas.clientWidth || 600; H = Math.round(typeof aspect === "function" ? aspect(W) : W * aspect);
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); canvas.style.height = H + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      draw(ctx, W, H);
+    };
+    new ResizeObserver(() => requestAnimationFrame(fit)).observe(canvas);
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => fit(true));
+    new MutationObserver(() => fit(true)).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return { redraw: () => fit(true), size: () => [W, H] };
+  }
+  // Runs step(dt) while the canvas is on screen.
+  function animate(canvas, step) {
+    let on = false, last = 0;
+    new IntersectionObserver(([e]) => { on = e.isIntersecting; if (on) { last = performance.now(); requestAnimationFrame(loop); } }).observe(canvas);
+    function loop(now) {
+      if (!on) return;
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      step(dt);
+      requestAnimationFrame(loop);
+    }
+  }
+
+  /* ---------- Surfaces: closest point on a core, out by a radius ---------- */
+  {
+    const canvas = $("projCanvas");
+    const regular = (n, rad, rot) => Array.from({ length: n }, (_, i) => { const a = rot + (i / n) * Math.PI * 2; return [Math.cos(a) * rad, Math.sin(a) * rad]; });
+    const SHAPES = {
+      sphere: { kind: "points", pts: [[0, 0]], r: 0.82 },
+      cube: { kind: "poly", pts: [[-0.54, -0.54], [0.54, -0.54], [0.54, 0.54], [-0.54, 0.54]], r: 0.24 },
+      poly: { kind: "poly", pts: regular(5, 0.78, Math.PI / 2), r: 0.18 },
+      capsule: { kind: "segment", pts: [[0, -0.36], [0, 0.36]], r: 0.58 },
+      torus: { kind: "points", pts: [[-0.72, 0], [0.72, 0]], r: 0.35 },
+    };
+    const closestOnSegment = (p, a, b) => {
+      const ex = b[0] - a[0], ey = b[1] - a[1];
+      const t = clamp(((p[0] - a[0]) * ex + (p[1] - a[1]) * ey) / (ex * ex + ey * ey), 0, 1);
+      return [a[0] + ex * t, a[1] + ey * t];
+    };
+    // Returns [point, normal, region].
+    function project(s, p) {
+      if (s.kind === "poly") {
+        const n = s.pts.length;
+        let best = -Infinity, bi = 0, inside = true;
+        for (let i = 0; i < n; i++) {
+          const a = s.pts[i], b = s.pts[(i + 1) % n];
+          let nx = b[1] - a[1], ny = -(b[0] - a[0]); const l = Math.hypot(nx, ny); nx /= l; ny /= l;
+          const d = (p[0] - a[0]) * nx + (p[1] - a[1]) * ny;
+          if (d > 0) inside = false;
+          if (d > best) { best = d; bi = i; }
+        }
+        if (inside) {
+          const a = s.pts[bi], b = s.pts[(bi + 1) % n];
+          let nx = b[1] - a[1], ny = -(b[0] - a[0]); const l = Math.hypot(nx, ny); nx /= l; ny /= l;
+          const k = best - s.r;
+          return [[p[0] - nx * k, p[1] - ny * k], [nx, ny], "inside the core: nearest face"];
+        }
+        let q = null, dq = Infinity, onEdge = false;
+        for (let i = 0; i < n; i++) {
+          const a = s.pts[i], b = s.pts[(i + 1) % n], c = closestOnSegment(p, a, b);
+          const d = Math.hypot(p[0] - c[0], p[1] - c[1]);
+          if (d < dq) { dq = d; q = c; onEdge = Math.hypot(c[0] - a[0], c[1] - a[1]) > 1e-6 && Math.hypot(c[0] - b[0], c[1] - b[1]) > 1e-6; }
+        }
+        const nx = (p[0] - q[0]) / dq, ny = (p[1] - q[1]) / dq;
+        return [[q[0] + nx * s.r, q[1] + ny * s.r], [nx, ny], onEdge ? "beyond a face" : "rounded corner"];
+      }
+      let q;
+      if (s.kind === "segment") q = closestOnSegment(p, s.pts[0], s.pts[1]);
+      else { q = s.pts[0]; for (const c of s.pts) if (Math.hypot(p[0] - c[0], p[1] - c[1]) < Math.hypot(p[0] - q[0], p[1] - q[1])) q = c; }
+      let dx = p[0] - q[0], dy = p[1] - q[1]; const l = Math.hypot(dx, dy);
+      if (l < 1e-9) { dx = 0; dy = 1; } else { dx /= l; dy /= l; }
+      return [[q[0] + dx * s.r, q[1] + dy * s.r], [dx, dy], s.kind === "segment" ? "nearest point on the segment" : "nearest core point"];
+    }
+    let probe = [0.95, 0.62];
+    const view = setup(canvas, (W) => Math.min(380, W * 0.52), (ctx, W, H) => {
+      const s = SHAPES[$("pShape").value];
+      const sc = H / 2.5, cx = W / 2, cy = H / 2;
+      const X = (x) => cx + x * sc, Y = (y) => cy - y * sc;
+      ctx.clearRect(0, 0, W, H);
+      // The surface is the core stroked with a round pen as wide as the rounding diameter.
+      const corePath = () => {
+        ctx.beginPath();
+        if (s.kind === "poly") { s.pts.forEach((p, i) => (i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])))); ctx.closePath(); }
+        else if (s.kind === "segment") { ctx.moveTo(X(s.pts[0][0]), Y(s.pts[0][1])); ctx.lineTo(X(s.pts[1][0]), Y(s.pts[1][1])); }
+        else for (const p of s.pts) { ctx.moveTo(X(p[0]) + 0.01, Y(p[1])); ctx.lineTo(X(p[0]), Y(p[1])); }
+      };
+      ctx.lineJoin = "round"; ctx.lineCap = "round";
+      corePath(); ctx.strokeStyle = css("--ink"); ctx.lineWidth = 2 * s.r * sc + 3; ctx.stroke();
+      if (s.kind === "poly") { ctx.fillStyle = css("--floor"); ctx.fill(); }
+      corePath(); ctx.strokeStyle = css("--floor"); ctx.lineWidth = 2 * s.r * sc; ctx.stroke();
+      ctx.setLineDash([4, 4]); corePath(); ctx.strokeStyle = css("--stage-ink"); ctx.lineWidth = 1;
+      if (s.kind === "points") for (const p of s.pts) { ctx.beginPath(); ctx.arc(X(p[0]), Y(p[1]), 3, 0, Math.PI * 2); ctx.stroke(); }
+      else ctx.stroke();
+      ctx.setLineDash([]);
+      if ($("pField").checked) {
+        const step = 0.2, xr = (W / 2) / sc, yr = (H / 2) / sc;
+        ctx.lineWidth = 1;
+        for (let y = -Math.floor(yr / step) * step; y <= yr; y += step) {
+          for (let x = -Math.floor(xr / step) * step; x <= xr; x += step) {
+            const [q] = project(s, [x, y]);
+            ctx.strokeStyle = css("--stage-ink"); ctx.globalAlpha = 0.55;
+            ctx.beginPath(); ctx.moveTo(X(x), Y(y)); ctx.lineTo(X(q[0]), Y(q[1])); ctx.stroke();
+            ctx.globalAlpha = 1; ctx.fillStyle = css("--accent2");
+            ctx.beginPath(); ctx.arc(X(q[0]), Y(q[1]), 1.6, 0, Math.PI * 2); ctx.fill();
+          }
+        }
+      }
+      const [q, n, region] = project(s, probe);
+      ctx.strokeStyle = css("--accent"); ctx.fillStyle = css("--accent"); ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(X(probe[0]), Y(probe[1])); ctx.lineTo(X(q[0]), Y(q[1])); ctx.stroke();
+      ctx.beginPath(); ctx.arc(X(probe[0]), Y(probe[1]), 4.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(X(q[0]), Y(q[1]), 4, 0, Math.PI * 2); ctx.fill();
+      const nl = 0.3;
+      ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.moveTo(X(q[0]), Y(q[1])); ctx.lineTo(X(q[0] + n[0] * nl), Y(q[1] + n[1] * nl)); ctx.stroke();
+      ctx.fillStyle = css("--muted"); ctx.font = font(11);
+      ctx.fillText("p", X(probe[0]) + 7, Y(probe[1]) - 6);
+      ctx.fillText("n", X(q[0] + n[0] * nl) + 4, Y(q[1] + n[1] * nl));
+      const d = Math.hypot(probe[0] - q[0], probe[1] - q[1]);
+      $("pOut").innerHTML = `<span>region <b>${region}</b></span><span>distance <b>${d.toFixed(3)}</b></span><span>rounding radius <b>${s.r.toFixed(2)}</b></span>`;
+    });
+    const move = (e) => {
+      const r = canvas.getBoundingClientRect(), [W, H] = view.size(), sc = H / 2.5;
+      probe = [(e.clientX - r.left - W / 2) / sc, -(e.clientY - r.top - H / 2) / sc];
+      view.redraw();
+    };
+    canvas.addEventListener("pointermove", move);
+    canvas.addEventListener("pointerdown", move);
+    $("pShape").addEventListener("change", view.redraw);
+    $("pField").addEventListener("change", view.redraw);
+    view.redraw();
+  }
+
+  /* ---------- Mazes on a wrapping grid ---------- */
+  // Cells i + j * nx; edge 2 * cell is to the right, 2 * cell + 1 is below; both wrap.
+  function makeGrid(nx, ny) {
+    const N = nx * ny, adj = Array.from({ length: N }, () => []);
+    for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) {
+      const c = i + j * nx, r = ((i + 1) % nx) + j * nx, d = i + ((j + 1) % ny) * nx;
+      adj[c].push({ nb: r, e: 2 * c, dir: [1, 0] }); adj[r].push({ nb: c, e: 2 * c, dir: [-1, 0] });
+      adj[c].push({ nb: d, e: 2 * c + 1, dir: [0, 1] }); adj[d].push({ nb: c, e: 2 * c + 1, dir: [0, -1] });
+    }
+    return { nx, ny, N, adj };
+  }
+  function carve(g, alg, rnd) {
+    const open = new Set(), { N, adj } = g;
+    if (alg === "kruskal") {
+      const parent = Int32Array.from({ length: N }, (_, i) => i);
+      const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+      const edges = [];
+      for (let c = 0; c < N; c++) for (const a of adj[c]) if (a.e >> 1 === c) edges.push({ a: c, b: a.nb, e: a.e, w: rnd() });
+      edges.sort((x, y) => x.w - y.w);
+      for (const e of edges) { const ra = find(e.a), rb = find(e.b); if (ra !== rb) { parent[rb] = ra; open.add(e.e); } }
+    } else if (alg === "rings") {
+      const scalar = (c) => (Math.floor(c / g.nx) / g.ny) * Math.PI * 2;
+      const seen = new Uint8Array(N), frontier = [];
+      const add = (c) => { for (const a of adj[c]) if (!seen[a.nb]) { let d = Math.abs(scalar(c) - scalar(a.nb)); if (d > Math.PI) d = Math.PI * 2 - d; frontier.push({ to: a.nb, e: a.e, cost: d * 8.5 + rnd() * 0.35 }); } };
+      const s0 = Math.floor(rnd() * N); seen[s0] = 1; add(s0);
+      while (frontier.length) {
+        let bi = 0; for (let i = 1; i < frontier.length; i++) if (frontier[i].cost < frontier[bi].cost) bi = i;
+        const f = frontier[bi]; frontier[bi] = frontier[frontier.length - 1]; frontier.pop();
+        if (seen[f.to]) continue;
+        seen[f.to] = 1; open.add(f.e); add(f.to);
+      }
+    } else {
+      const seen = new Uint8Array(N), s0 = Math.floor(rnd() * N);
+      seen[s0] = 1;
+      const stack = [{ c: s0, dir: [0, 0] }];
+      while (stack.length) {
+        const top = stack[stack.length - 1];
+        let best = null;
+        for (const a of adj[top.c]) {
+          if (seen[a.nb]) continue;
+          const score = rnd() + 0.38 * (a.dir[0] * top.dir[0] + a.dir[1] * top.dir[1]);
+          if (!best || score > best.score) best = { a, score };
+        }
+        if (!best) { stack.pop(); continue; }
+        seen[best.a.nb] = 1; open.add(best.a.e); stack.push({ c: best.a.nb, dir: best.a.dir });
+      }
+      if (alg === "braided") {
+        const degree = new Int32Array(N);
+        for (let c = 0; c < N; c++) for (const a of adj[c]) if (open.has(a.e)) degree[c]++;
+        const dead = [];
+        for (let c = 0; c < N; c++) if (degree[c] === 1) dead.push(c);
+        for (let i = dead.length - 1; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [dead[i], dead[j]] = [dead[j], dead[i]]; }
+        for (const c of dead) {
+          if (degree[c] > 1 || rnd() < 0.12) continue;
+          let best = null, bs = -1;
+          for (const a of adj[c]) { if (open.has(a.e)) continue; const s = (degree[a.nb] === 1 ? 2 : 1) + rnd() * 0.5; if (s > bs) { bs = s; best = a; } }
+          if (best) { open.add(best.e); degree[c]++; degree[best.nb]++; }
+        }
+      }
+    }
+    return open;
+  }
+  function bfs(g, open, src, ok = () => true) {
+    const dist = new Int32Array(g.N).fill(-1), parent = new Int32Array(g.N).fill(-1), q = [src];
+    dist[src] = 0;
+    let far = src;
+    for (let h = 0; h < q.length; h++) {
+      const u = q[h];
+      if (dist[u] > dist[far]) far = u;
+      for (const a of g.adj[u]) if (ok(a.e) && open.has(a.e) && dist[a.nb] < 0) { dist[a.nb] = dist[u] + 1; parent[a.nb] = u; q.push(a.nb); }
+    }
+    return { dist, parent, far };
+  }
+  function drawWalls(ctx, g, open, cs, ox, oy, color, width) {
+    ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = "round";
+    ctx.beginPath();
+    for (let j = 0; j < g.ny; j++) for (let i = 0; i < g.nx; i++) {
+      const c = i + j * g.nx;
+      if (!open.has(2 * c)) {
+        for (const x of i === g.nx - 1 ? [g.nx, 0] : [i + 1]) { ctx.moveTo(ox + x * cs, oy + j * cs); ctx.lineTo(ox + x * cs, oy + (j + 1) * cs); }
+      }
+      if (!open.has(2 * c + 1)) {
+        for (const y of j === g.ny - 1 ? [g.ny, 0] : [j + 1]) { ctx.moveTo(ox + i * cs, oy + y * cs); ctx.lineTo(ox + (i + 1) * cs, oy + y * cs); }
+      }
+    }
+    ctx.stroke();
+  }
+  // Polyline through cell centres that breaks where it wraps.
+  function drawRoute(ctx, g, cells, cs, ox, oy) {
+    ctx.beginPath();
+    let prev = null;
+    for (const c of cells) {
+      const i = c % g.nx, j = Math.floor(c / g.nx), x = ox + (i + 0.5) * cs, y = oy + (j + 0.5) * cs;
+      if (prev && Math.abs(prev[0] - i) <= 1 && Math.abs(prev[1] - j) <= 1) ctx.lineTo(x, y);
+      else if (prev) {
+        const di = i - prev[0], dj = j - prev[1], sx = di ? -Math.sign(di) : 0, sy = dj ? -Math.sign(dj) : 0;
+        ctx.lineTo(ox + (prev[0] + 0.5 + sx * 0.5) * cs, oy + (prev[1] + 0.5 + sy * 0.5) * cs);
+        ctx.moveTo(ox + (i + 0.5 - sx * 0.5) * cs, oy + (j + 0.5 - sy * 0.5) * cs); ctx.lineTo(x, y);
+      } else ctx.moveTo(x, y);
+      prev = [i, j];
+    }
+    ctx.stroke();
+  }
+  {
+    const canvas = $("mazeCanvas");
+    let seed = 3, g, open, start, goal, route;
+    function build() {
+      const [W] = view ? view.size() : [canvas.clientWidth || 800];
+      const nx = W < 520 ? 16 : 26, ny = W < 520 ? 10 : 13;
+      g = makeGrid(nx, ny);
+      const rnd = mulberry(seed * 977 + $("mAlg").selectedIndex);
+      open = carve(g, $("mAlg").value, rnd);
+      const first = bfs(g, open, Math.floor(rnd() * g.N));
+      goal = first.far;
+      const second = bfs(g, open, goal);
+      start = second.far;
+      route = [];
+      for (let c = start; c >= 0; c = second.parent[c]) route.push(c);
+      const degree = new Int32Array(g.N);
+      for (let c = 0; c < g.N; c++) for (const a of g.adj[c]) if (open.has(a.e)) degree[c]++;
+      let dead = 0; for (const d of degree) if (d === 1) dead++;
+      $("mOut").innerHTML = `<span>cells <b>${g.N}</b></span><span>dead ends <b>${dead}</b></span><span>loops <b>${open.size - (g.N - 1)}</b></span><span>start to goal <b>${route.length - 1}</b> steps</span>`;
+    }
+    let view = null;
+    view = setup(canvas, (W) => W * (W < 520 ? 10 / 16 : 13 / 26), (ctx, W, H) => {
+      if (!g || (W < 520) !== (g.nx === 16)) build();
+      const cs = Math.min(W / g.nx, H / g.ny), ox = (W - cs * g.nx) / 2, oy = (H - cs * g.ny) / 2;
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = css("--floor"); ctx.fillRect(ox, oy, cs * g.nx, cs * g.ny);
+      if ($("mSol").checked) { ctx.strokeStyle = css("--thread"); ctx.lineWidth = Math.max(2, cs * 0.14); ctx.lineJoin = "round"; drawRoute(ctx, g, route, cs, ox, oy); }
+      drawWalls(ctx, g, open, cs, ox, oy, css("--wall"), Math.max(2, cs * 0.16));
+      const at = (c) => [ox + ((c % g.nx) + 0.5) * cs, oy + (Math.floor(c / g.nx) + 0.5) * cs];
+      const [sx, sy] = at(start), [gx, gy] = at(goal);
+      ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(sx, sy, cs * 0.3, 0, Math.PI * 2); ctx.stroke();
+      ctx.fillStyle = css("--marble"); ctx.beginPath(); ctx.arc(sx, sy, cs * 0.2, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = css("--thread"); ctx.beginPath(); ctx.arc(gx, gy, cs * 0.34, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = css("--ink"); ctx.beginPath(); ctx.arc(gx, gy, cs * 0.2, 0, Math.PI * 2); ctx.fill();
+    });
+    $("mAlg").addEventListener("change", () => { build(); view.redraw(); });
+    $("mSol").addEventListener("change", view.redraw);
+    $("mNew").addEventListener("click", () => { seed++; build(); view.redraw(); });
+  }
+
+  /* ---------- Door widths: widest-path bottleneck ---------- */
+  {
+    const canvas = $("widthCanvas");
+    let seed = 6, g, open, width, result;
+    function build() {
+      const [W] = view ? view.size() : [canvas.clientWidth || 800];
+      g = makeGrid(W < 520 ? 12 : 20, W < 520 ? 8 : 9);
+      open = carve(g, "braided", mulberry(41));
+      const rnd = mulberry(seed), narrow = +$("wN").value;
+      width = new Map();
+      for (const e of open) width.set(e, rnd() < narrow ? 0.03 + 0.15 * rnd() : 0.3 + 0.16 * rnd());
+      const sorted = [...open].sort((a, b) => width.get(b) - width.get(a));
+      const parent = Int32Array.from({ length: g.N }, (_, i) => i), size = new Int32Array(g.N).fill(1);
+      const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+      const target = Math.ceil(g.N * 0.9), fallbackTarget = Math.ceil(g.N * 0.7);
+      let bottleneck = -1, bottleEdge = -1, fallback = -1;
+      for (const e of sorted) {
+        const c = e >> 1, nb = e & 1 ? (c % g.nx) + ((Math.floor(c / g.nx) + 1) % g.ny) * g.nx : ((c % g.nx) + 1) % g.nx + Math.floor(c / g.nx) * g.nx;
+        const ra = find(c), rb = find(nb);
+        if (ra === rb) continue;
+        parent[rb] = ra; size[ra] += size[rb];
+        if (fallback < 0 && size[ra] >= fallbackTarget) fallback = width.get(e);
+        if (size[ra] >= target) { bottleneck = width.get(e); bottleEdge = e; break; }
+      }
+      const raised = fallback > 0 && bottleneck < fallback * 0.6;
+      if (raised) bottleneck = fallback * 0.6;
+      const wall = 0.24 * bottleneck, r = 0.75 * (bottleneck - wall), minSpan = wall + 1.04 * r;
+      let excluded = 0; for (const e of open) if (width.get(e) < minSpan) excluded++;
+      result = { bottleneck, bottleEdge, raised, wall, r, minSpan };
+      $("wOut").innerHTML = `<span>bottleneck half-span <b>${bottleneck.toFixed(3)}</b>${raised ? " (raised)" : ""}</span><span>wall half-width <b>${wall.toFixed(3)}</b></span><span>marble radius <b>${r.toFixed(3)}</b></span><span>doors left off the route <b>${excluded}</b> of ${open.size}</span>`;
+    }
+    let view = null;
+    view = setup(canvas, (W) => W * (W < 520 ? 8 / 12 : 9 / 20), (ctx, W, H) => {
+      if (!g || (W < 520) !== (g.nx === 12)) build();
+      const cs = Math.min(W / g.nx, H / g.ny), ox = (W - cs * g.nx) / 2, oy = (H - cs * g.ny) / 2;
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = css("--wall"); ctx.globalAlpha = 0.35; ctx.fillRect(ox, oy, cs * g.nx, cs * g.ny); ctx.globalAlpha = 1;
+      ctx.fillStyle = css("--floor");
+      const cr = cs * 0.46;
+      for (let c = 0; c < g.N; c++) { const x = ox + ((c % g.nx) + 0.5) * cs, y = oy + (Math.floor(c / g.nx) + 0.5) * cs; ctx.fillRect(x - cr, y - cr, 2 * cr, 2 * cr); }
+      // Each door as a band between the two cell centres, as wide as its span; wrapped doors drawn on both sides.
+      for (const e of open) {
+        const c = e >> 1, i = c % g.nx, j = Math.floor(c / g.nx), w = width.get(e), half = w * cs;
+        const ok = w >= result.minSpan;
+        ctx.fillStyle = e === result.bottleEdge ? css("--accent") : ok ? css("--floor") : css("--stage-ink");
+        ctx.globalAlpha = ok || e === result.bottleEdge ? 1 : 0.6;
+        const x = ox + (i + 0.5) * cs, y = oy + (j + 0.5) * cs;
+        if (e & 1) { ctx.fillRect(x - half, y, 2 * half, cs); if (j === g.ny - 1) ctx.fillRect(x - half, oy - cs * 0.5, 2 * half, cs); }
+        else { ctx.fillRect(x, y - half, cs, 2 * half); if (i === g.nx - 1) ctx.fillRect(ox - cs * 0.5, y - half, cs, 2 * half); }
+      }
+      ctx.globalAlpha = 1;
+      ctx.clearRect(0, 0, W, oy); ctx.clearRect(0, oy + cs * g.ny, W, H); ctx.clearRect(0, 0, ox, H); ctx.clearRect(ox + cs * g.nx, 0, W, H);
+      const c0 = Math.floor(g.N / 2) + Math.floor(g.nx / 2);
+      const mx = ox + ((c0 % g.nx) + 0.5) * cs, my = oy + (Math.floor(c0 / g.nx) + 0.5) * cs;
+      ctx.fillStyle = css("--marble"); ctx.beginPath(); ctx.arc(mx, my, result.r * cs, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = css("--muted"); ctx.font = font(11);
+      ctx.fillText("marble at the solved radius", mx + result.r * cs + 6, my + 4);
+    });
+    $("wN").addEventListener("input", () => { $("wNo").textContent = (+$("wN").value * 100).toFixed(1).replace(/\.0$/, "") + "%"; build(); view.redraw(); });
+    $("wNew").addEventListener("click", () => { seed++; build(); view.redraw(); });
+  }
+
+  /* ---------- The marble on a turning disc, by hand or steered ---------- */
+  {
+    const canvas = $("rollCanvas");
+    const PROFILES = {
+      steady: { cruise: 0.2, tiltBase: 0.2, over: 0.5, under: 0.15, minTilt: -0.06, maxTilt: 0.24, tiltRate: 2, targetRate: 2, gain: 5, max: 1.2, accel: 2 },
+      optimal: { cruise: 0.8, tiltBase: 0.49, over: 0.72, under: 0.22, minTilt: -0.26, maxTilt: 0.54, tiltRate: 7.8, targetRate: Infinity, gain: 10, max: 8, rate: 20 },
+    };
+    const R = 1, rBall = 0.07, G = 6.4, START = Math.PI / 2 + 0.3, GOAL = START + 5.0, POST = START - 0.28;
+    let st;
+    const reset = () => { st = { theta: Math.PI / 2 - START, omega: 0, prevOmega: 0, phi: START, v: 0, tilt: 0.2, slope: null, captured: 0, idle: 0 }; };
+    reset();
+    const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+    function step(dt) {
+      const mode = $("rMode").value, prof = PROFILES[mode];
+      if (st.captured > 0) {
+        st.omega *= Math.exp(-dt * 5.2);
+      } else if (prof) {
+        st.idle += dt;
+        const blendIn = Math.min(1, st.idle / 1.4);
+        const speedAlong = st.v;
+        const err = prof.cruise - speedAlong;
+        const target = clamp(prof.tiltBase + (err < 0 ? err * prof.over : err * prof.under), prof.minTilt, prof.maxTilt);
+        st.tilt += (target - st.tilt) * (1 - Math.exp(-dt * prof.tiltRate));
+        // World aim: the tangent toward the goal, rotated by the piece; only its horizontal sign matters here.
+        const ta = st.phi + st.theta + Math.PI / 2;
+        const sx = Math.cos(ta) >= 0 ? 1 : -1;
+        const want = [sx * Math.sin(st.tilt), Math.cos(st.tilt)];
+        if (!st.slope || !isFinite(prof.targetRate)) st.slope = want.slice();
+        else { const k = 1 - Math.exp(-dt * prof.targetRate); st.slope = [mix(st.slope[0], want[0], k), mix(st.slope[1], want[1], k)]; }
+        const look = st.phi + 0.2;
+        const nx = Math.cos(st.phi + st.theta) + 0.3 * Math.cos(look + st.theta), ny = Math.sin(st.phi + st.theta) + 0.3 * Math.sin(look + st.theta);
+        const errAngle = wrap(Math.atan2(st.slope[1], st.slope[0]) - Math.atan2(ny, nx));
+        const tw = Math.sign(errAngle) * Math.min(prof.max, Math.abs(errAngle) * prof.gain) * blendIn;
+        if (prof.accel) st.omega += clamp(tw - st.omega, -prof.accel * dt, prof.accel * dt);
+        else st.omega = mix(st.omega, tw, 1 - Math.exp(-dt * prof.rate));
+      } else {
+        st.idle = 0;
+        const target = (+$("rAng").value * Math.PI) / 180;
+        const tw = clamp(wrap(target - st.theta) * 6, -8.5, 8.5);
+        st.omega = mix(st.omega, tw, 1 - Math.exp(-dt * 12));
+      }
+      st.theta = wrap(st.theta + st.omega * dt);
+      const alpha = clamp((st.omega - st.prevOmega) / Math.max(dt, 1e-4), -35, 35);
+      st.prevOmega = st.omega;
+      if (st.captured > 0) {
+        st.captured += dt; st.v = 0; st.phi = mix(st.phi, GOAL, 1 - Math.exp(-dt * 18));
+        if (st.captured > 1.05) reset();
+        return;
+      }
+      const sub = 8, h = dt / sub;
+      for (let s = 0; s < sub; s++) {
+        // Gravity in the disc's frame: world down rotated by the inverse of the piece's turn.
+        const gx = -G * Math.sin(-st.theta) * -1, gy = -G * Math.cos(-st.theta);
+        const tx = -Math.sin(st.phi), ty = Math.cos(st.phi);
+        let a = gx * tx + gy * ty - 0.14 * alpha * R;
+        const dGoal = GOAL - st.phi;
+        if (Math.abs(dGoal) < 0.3) { const t = 1 - Math.abs(dGoal) / 0.3; a += Math.sign(dGoal) * (9.5 * t + 24 * t * t) * 0.3; st.v *= Math.exp(-(2.4 + 8 * t * t) * h); }
+        st.v += (5 / 7) * a * h;
+        st.v *= Math.exp(-1.15 * h);
+        st.v = clamp(st.v, -3.2, 3.2);
+        st.phi += (st.v * h) / R;
+        const minAng = (rBall + 0.03) / R;
+        if (st.phi < POST + minAng) {
+          st.phi = POST + minAng;
+          const vn = -st.v;
+          if (vn > 0) st.v += vn * (1 + (vn > 0.12 ? 0.24 : 0));
+        }
+        if (st.phi > GOAL + 0.2) st.phi = GOAL + 0.2;
+        if ((Math.abs(GOAL - st.phi) < 0.05 && Math.abs(st.v) < 1.75) || Math.abs(GOAL - st.phi) < 0.03) { st.captured = 1e-4; break; }
+      }
+    }
+    const view = setup(canvas, (W) => Math.min(380, W * 0.5), (ctx, W, H) => {
+      ctx.clearRect(0, 0, W, H);
+      const sc = H * 0.34, cx = W / 2, cy = H * 0.5;
+      const P = (ang, rad) => [cx + Math.cos(ang + st.theta) * rad * sc, cy - Math.sin(ang + st.theta) * rad * sc];
+      ctx.fillStyle = css("--floor"); ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.5;
+      ctx.beginPath(); ctx.arc(cx, cy, R * sc, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.strokeStyle = css("--stage-ink"); ctx.lineWidth = 1;
+      for (let k = 0; k < 24; k++) { const a = (k / 24) * Math.PI * 2, [x0, y0] = P(a, 0.9), [x1, y1] = P(a, 0.97); ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke(); }
+      ctx.strokeStyle = css("--thread"); ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(cx, cy, R * sc - 6, -(START + st.theta), -(GOAL + st.theta), true); ctx.stroke();
+      const [px0, py0] = P(POST, R), [px1, py1] = P(POST, R + 0.22);
+      ctx.strokeStyle = css("--wall"); ctx.lineWidth = 7; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(px0, py0); ctx.lineTo(px1, py1); ctx.stroke();
+      const [sxp, syp] = P(START, R);
+      ctx.strokeStyle = css("--ink"); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(sxp, syp, rBall * sc * 1.5, 0, Math.PI * 2); ctx.stroke();
+      const [gxp, gyp] = P(GOAL, R);
+      ctx.fillStyle = css("--thread"); ctx.beginPath(); ctx.arc(gxp, gyp, rBall * sc * 1.7, 0, Math.PI * 2); ctx.fill();
+      const [mx, my] = P(st.phi, R + rBall);
+      ctx.fillStyle = css("--marble"); ctx.beginPath(); ctx.arc(mx, my, rBall * sc, 0, Math.PI * 2); ctx.fill();
+      // Gravity, and its part along the floor.
+      const ang = st.phi + st.theta, tx = -Math.sin(ang), ty = Math.cos(ang), gl = 0.55;
+      const along = -ty;
+      const arrow = (x0, y0, dx, dy, col) => {
+        const x1 = x0 + dx * sc, y1 = y0 - dy * sc, a = Math.atan2(y1 - y0, x1 - x0);
+        ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x0, y0); ctx.lineTo(x1, y1); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x1 - 8 * Math.cos(a - 0.4), y1 - 8 * Math.sin(a - 0.4)); ctx.lineTo(x1 - 8 * Math.cos(a + 0.4), y1 - 8 * Math.sin(a + 0.4)); ctx.closePath(); ctx.fill();
+      };
+      arrow(mx, my, 0, -gl * 0.7, css("--stage-ink"));
+      if (Math.abs(along) > 0.02) arrow(mx, my, tx * along * gl * 0.7, ty * along * gl * 0.7, css("--accent"));
+      ctx.fillStyle = css("--muted"); ctx.font = font(11);
+      ctx.fillText("up", 14, 22); arrow(10, 50, 0, 0.09, css("--muted"));
+      const slope = Math.acos(clamp(Math.sin(ang), -1, 1));
+      $("rOut").innerHTML = `<span>floor slope under the marble <b>${deg(slope)}°</b></span><span>marble speed <b>${Math.abs(st.v).toFixed(2)}</b></span><span>piece turning <b>${Math.abs(st.omega).toFixed(2)} rad/s</b></span>${st.captured ? "<span><b>in the cup</b></span>" : ""}`;
+      $("rAngO").textContent = $("rAng").value + "°";
+    });
+    $("rMode").addEventListener("change", () => {
+      const hand = $("rMode").value === "hand";
+      $("rAng").disabled = !hand;
+      if (hand) $("rAng").value = Math.round((st.theta * 180) / Math.PI);
+      st.slope = null;
+    });
+    $("rAng").addEventListener("input", view.redraw);
+    $("rReset").addEventListener("click", () => { reset(); view.redraw(); });
+    if (reduce) view.redraw();
+    else animate(canvas, (dt) => { step(dt); view.redraw(); });
+  }
+
+  /* ---------- Floor reflection: rays against wall boxes ---------- */
+  {
+    const canvas = $("reflCanvas");
+    const HW = 0.17, H = 1, WALLS = [0.9, 1.75, 3.3, 4.2, 5.6, 6.6], MARBLE = { x: 2.55, r: 0.32 };
+    const EYE = [-0.8, 2.8];
+    // Signed distance from q to the box [lo, hi].
+    const sdBox = (q, lo, hi) => {
+      const cx = (lo[0] + hi[0]) / 2, cy = (lo[1] + hi[1]) / 2, ex = (hi[0] - lo[0]) / 2, ey = (hi[1] - lo[1]) / 2;
+      const dx = Math.abs(q[0] - cx) - ex, dy = Math.abs(q[1] - cy) - ey;
+      return Math.hypot(Math.max(dx, 0), Math.max(dy, 0)) + Math.min(Math.max(dx, dy), 0);
+    };
+    function trace(px, rough, reachH) {
+      const o = [px, 0];
+      let vx = px - EYE[0], vy = 0 - EYE[1]; const vl = Math.hypot(vx, vy); vx /= vl; vy /= vl;
+      const d = [vx, -vy];
+      const reach = reachH * H, rise = d[1];
+      const maxT = Math.min(reach * 3, (H + 0.01) / Math.max(rise, 0.025));
+      const cone = 0.012 + rough * 1.3;
+      const out = { o, d, maxT, cone, reach, walls: [], best: null, skip: rough > 0.55 };
+      if (out.skip) return out;
+      const eAt = (t) => (cone + (0.15 * t) / reach) * t;
+      const mc = [MARBLE.x - o[0], MARBLE.r - o[1]], tcm = mc[0] * d[0] + mc[1] * d[1];
+      if (tcm > 0 && tcm < maxT + MARBLE.r) {
+        const md = Math.hypot(mc[0] - d[0] * tcm, mc[1] - d[1] * tcm) - MARBLE.r;
+        const c = 1 - smooth(0, eAt(tcm) + 1e-4, md);
+        if (c > 0) out.best = { cover: c, t: tcm, kind: "marble" };
+      }
+      for (const x of WALLS) {
+        const rad = Math.hypot(HW, (H + 0.014) / 2), c = [x, (H - 0.014) / 2];
+        const oc = [c[0] - o[0], c[1] - o[1]], tc = oc[0] * d[0] + oc[1] * d[1];
+        const w = { x, rad, c, state: "sphere" };
+        out.walls.push(w);
+        if (tc < -rad || tc - rad > maxT) continue;
+        const te = Math.max(tc, 0.004), e = eAt(te);
+        if (oc[0] * oc[0] + oc[1] * oc[1] - tc * tc > (rad + e) * (rad + e)) continue;
+        w.state = "box"; w.e = e;
+        const lo = [x - HW, -0.014], hi = [x + HW, H];
+        let tNear = 0.002, tFar = maxT;
+        for (let k = 0; k < 2; k++) {
+          const dk = d[k] || 1e-7, a = (lo[k] - (k === 0 ? e : 0) - o[k]) / dk, b = (hi[k] + e - o[k]) / dk;
+          tNear = Math.max(tNear, Math.min(a, b)); tFar = Math.min(tFar, Math.max(a, b));
+        }
+        if (tNear > tFar) continue;
+        const tm = 0.5 * (tNear + tFar), q = [o[0] + d[0] * tm, o[1] + d[1] * tm];
+        const cover = 1 - smooth(0, e, sdBox(q, lo, hi));
+        w.state = "hit"; w.t = tNear; w.cover = cover;
+        const solid = cover > 0.98, bestSolid = out.best && out.best.cover > 0.98;
+        if (solid ? (!bestSolid || tNear < out.best.t) : (!bestSolid && cover > (out.best ? out.best.cover : 0))) out.best = { cover, t: tNear, kind: "wall" };
+      }
+      return out;
+    }
+    const view = setup(canvas, (W) => Math.min(340, W * 0.42), (ctx, W, Hc) => {
+      ctx.clearRect(0, 0, W, Hc);
+      const x0 = -1, x1 = 7.3, sc = W / (x1 - x0), floorY = Hc * 0.86;
+      const X = (x) => (x - x0) * sc, Y = (y) => floorY - y * sc;
+      let px = mix(0.1, 6.2, +$("fX").value);
+      // Floor pixels lie between walls, never under one.
+      for (const x of WALLS) if (Math.abs(px - x) < HW + 0.1) px = x + Math.sign(px - x || 1) * (HW + 0.1);
+      const rough = +$("fR").value, reachH = +$("fH").value;
+      const tr = trace(px, rough, reachH);
+      ctx.fillStyle = css("--floor"); ctx.fillRect(0, floorY, W, Hc - floorY);
+      for (const x of WALLS) { ctx.fillStyle = css("--wall"); ctx.fillRect(X(x - HW), Y(H), HW * 2 * sc, H * sc); }
+      ctx.fillStyle = css("--marble"); ctx.beginPath(); ctx.arc(X(MARBLE.x), Y(MARBLE.r), MARBLE.r * sc, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = css("--stage-ink"); ctx.lineWidth = 1.2;
+      ctx.beginPath(); ctx.moveTo(X(EYE[0]), Y(EYE[1])); ctx.lineTo(X(px), Y(0)); ctx.stroke();
+      ctx.fillStyle = css("--ink"); ctx.beginPath(); ctx.arc(X(EYE[0]), Y(EYE[1]), 4, 0, Math.PI * 2); ctx.fill();
+      ctx.font = font(11); ctx.fillStyle = css("--muted"); ctx.fillText("eye", X(EYE[0]) + 8, Y(EYE[1]) + 4);
+      if (!tr.skip) {
+        for (const w of tr.walls) {
+          ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
+          ctx.strokeStyle = w.state === "sphere" ? css("--stage-ink") : css("--accent2");
+          ctx.globalAlpha = w.state === "sphere" ? 0.6 : 1;
+          ctx.beginPath(); ctx.arc(X(w.c[0]), Y(w.c[1]), w.rad * sc, 0, Math.PI * 2); ctx.stroke();
+          ctx.globalAlpha = 1;
+          if (w.state !== "sphere") { ctx.setLineDash([2, 2]); ctx.strokeRect(X(w.x - HW - w.e), Y(H + w.e), (2 * HW + 2 * w.e) * sc, (H + w.e + 0.014) * sc); }
+          ctx.setLineDash([]);
+        }
+        const tEnd = tr.best && tr.best.cover > 0.98 ? tr.best.t : tr.maxT;
+        const steps = 24, left = [], right = [];
+        for (let k = 0; k <= steps; k++) {
+          const t = (k / steps) * tEnd, e = (tr.cone + (0.15 * t) / tr.reach) * t;
+          const cxp = tr.o[0] + tr.d[0] * t, cyp = tr.o[1] + tr.d[1] * t;
+          left.push([cxp - tr.d[1] * e, cyp + tr.d[0] * e]); right.push([cxp + tr.d[1] * e, cyp - tr.d[0] * e]);
+        }
+        ctx.fillStyle = css("--accent2"); ctx.globalAlpha = 0.16;
+        ctx.beginPath(); left.forEach((p, i) => (i ? ctx.lineTo(X(p[0]), Y(p[1])) : ctx.moveTo(X(p[0]), Y(p[1])))); for (let i = right.length - 1; i >= 0; i--) ctx.lineTo(X(right[i][0]), Y(right[i][1])); ctx.fill();
+        ctx.globalAlpha = 1; ctx.strokeStyle = css("--accent2"); ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(X(px), Y(0)); ctx.lineTo(X(px + tr.d[0] * tEnd), Y(tr.d[1] * tEnd)); ctx.stroke();
+        if (tr.best) {
+          const hx = px + tr.d[0] * tr.best.t, hy = tr.d[1] * tr.best.t;
+          ctx.fillStyle = css("--accent"); ctx.beginPath(); ctx.arc(X(hx), Y(hy), 5, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.fillStyle = css("--ink"); ctx.beginPath(); ctx.arc(X(px), Y(0), 4, 0, Math.PI * 2); ctx.fill();
+      const rejected = tr.walls.filter((w) => w.state === "sphere").length;
+      const fade = tr.best ? Math.exp(-tr.best.t / tr.reach) : 0;
+      const final = tr.best ? tr.best.cover * tr.best.cover * fade * 0.75 : 0;
+      $("fOut").innerHTML = tr.skip
+        ? "<span><b>rougher than 0.55: no ray, environment only</b></span>"
+        : `<span>ray span <b>${tr.maxT.toFixed(2)}</b></span><span>rejected by sphere <b>${rejected}</b> of ${tr.walls.length}</span><span>hit <b>${tr.best ? tr.best.kind : "none"}</b></span>` +
+          (tr.best ? `<span>t <b>${tr.best.t.toFixed(2)}</b></span><span>edge cover <b>${tr.best.cover.toFixed(2)}</b></span><span>replaces env by <b>${Math.round(final * 100)}%</b></span>` : "");
+    });
+    const bindOut = (id, fmt) => $(id).addEventListener("input", () => { $(id + "o").textContent = fmt(+$(id).value); view.redraw(); });
+    bindOut("fX", (v) => v.toFixed(2)); bindOut("fR", (v) => v.toFixed(2)); bindOut("fH", (v) => v.toFixed(1));
+    view.redraw();
+  }
+
+  /* ---------- Transitions: slide and grow against the worker ---------- */
+  {
+    const canvas = $("transCanvas");
+    const FIN = [
+      { name: "walnut & brass", bg: "#221b17", floor: "#422414", wall: "#d6b07a", marble: "#d6dade" },
+      { name: "porcelain & cobalt", bg: "#d3dce2", floor: "#eef3f4", wall: "#123488", marble: "#f4d683" },
+      { name: "carbon & titanium", bg: "#16181d", floor: "#040507", wall: "#b8b3aa", marble: "#b80f24" },
+      { name: "jade & gilt", bg: "#1c221e", floor: "#356648", wall: "#86ba96", marble: "#f2ede2" },
+      { name: "travertine", bg: "#d4cdc0", floor: "#d6c7ae", wall: "#8a7a5c", marble: "#08090c" },
+    ];
+    const hexRgb = (h) => { const n = parseInt(h.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+    const easeOutBack = (t) => { const c1 = 1.38, c3 = c1 + 1; return 1 + c3 * Math.pow(t - 1, 3) + c1 * Math.pow(t - 1, 2); };
+    let cur = 0, next = 1, run = null, bgMix = 1, bgFrom = 0, clock = 0;
+    // Walls: arcs and spokes at fixed spots, each with its distance from the goal for the rise wave.
+    const goalAt = [0.55, -0.35];
+    const WALLS = [];
+    for (let k = 0; k < 9; k++) WALLS.push({ type: "arc", r: 0.35 + (k % 3) * 0.2, a0: k * 0.8, a1: k * 0.8 + 1.4 });
+    for (let k = 0; k < 7; k++) WALLS.push({ type: "spoke", a: k * 0.9 + 0.3, r0: 0.3 + (k % 2) * 0.2, r1: 0.6 + (k % 2) * 0.3 });
+    for (const w of WALLS) {
+      const a = w.type === "arc" ? (w.a0 + w.a1) / 2 : w.a, r = w.type === "arc" ? w.r : (w.r0 + w.r1) / 2;
+      w.wave = Math.min(1, Math.hypot(Math.cos(a) * r - goalAt[0], Math.sin(a) * r - goalAt[1]) / 1.6);
+    }
+    function phases(mode, build) {
+      if (mode === "slide") {
+        const out = 0.75, ready = build, swap = Math.max(out, ready);
+        return { list: [["slide out", 0, out], ["wait", out, swap], ["slide in", swap, swap + 0.75]], request: 0, ready, end: swap + 0.75 };
+      }
+      const hidden = 0.34 + 0.28, ready = hidden + build;
+      return { list: [["walls down", 0, 0.34], ["shrink", 0.34, hidden], ["build", hidden, ready], ["grow", ready, ready + 0.38], ["walls up", ready + 0.38, ready + 0.82]], request: hidden, ready, end: ready + 0.82 };
+    }
+    // State of the stage at time t into a run: which finish shows, offset, scale and wall raise.
+    function stateAt(r, t) {
+      const W = r.width;
+      if (r.mode === "slide") {
+        const [, , out] = r.ph.list[0], [, swap, end] = r.ph.list[2];
+        if (t < out) { const p = t / 0.75; return { fin: r.from, off: -W * p * p * p, scale: 1, raise: 1 }; }
+        if (t < swap) return { fin: r.from, off: -W, scale: 1, raise: 1, hidden: true };
+        const p = Math.min(1, (t - swap) / 0.75), rem = 1 - p;
+        return { fin: r.to, off: W * rem * rem * rem, scale: 1, raise: 1, done: t >= end };
+      }
+      const [, ready] = r.ph.list[3];
+      if (t < 0.34) { const p = t / 0.34; return { fin: r.from, off: 0, scale: 1, raise: 1 - p * p }; }
+      if (t < 0.62) { const p = (t - 0.34) / 0.28; return { fin: r.from, off: 0, scale: Math.pow(1 - p, 2.2), raise: 0 }; }
+      if (t < ready) return { fin: r.to, off: 0, scale: 0, raise: 0, hidden: true };
+      if (t < ready + 0.38) { const p = (t - ready) / 0.38; return { fin: r.to, off: 0, scale: Math.max(0.001, easeOutBack(p)), raise: 0 }; }
+      const p = Math.min(1, (t - ready - 0.38) / 0.44);
+      return { fin: r.to, off: 0, scale: 1, raise: 1 - Math.pow(1 - p, 2.4), done: p >= 1 };
+    }
+    const view = setup(canvas, (W) => Math.min(440, Math.max(280, W * 0.55)), (ctx, W, H) => {
+      const stageH = H - 86;
+      const bA = hexRgb(FIN[bgFrom].bg), bB = hexRgb(FIN[run ? run.to : cur].bg);
+      const bg = bA.map((v, i) => Math.round(mix(v, bB[i], bgMix)));
+      ctx.clearRect(0, 0, W, H);
+      ctx.fillStyle = `rgb(${bg.join(",")})`; ctx.fillRect(0, 0, W, stageH);
+      const s = run ? stateAt(run, run.t) : { fin: cur, off: 0, scale: 1, raise: 1 };
+      const R = stageH * 0.36;
+      if (!s.hidden && s.scale > 0.003) {
+        const f = FIN[s.fin], cx = W / 2 + s.off * (W / 2 + R + 4), cy = stageH / 2, rr = R * s.scale;
+        ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.beginPath(); ctx.ellipse(cx, cy + rr * 1.05, rr * 0.9, rr * 0.12, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = f.floor; ctx.strokeStyle = "rgba(0,0,0,0.35)"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(cx, cy, rr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        ctx.lineCap = "round";
+        for (const w of WALLS) {
+          const wave = w.wave * 0.45, lr = smooth(wave, wave + 0.55, s.raise);
+          if (lr <= 0.01) continue;
+          ctx.strokeStyle = f.wall; ctx.globalAlpha = lr; ctx.lineWidth = Math.max(1, rr * 0.05 * lr);
+          ctx.beginPath();
+          if (w.type === "arc") ctx.arc(cx, cy, w.r * rr, w.a0, w.a1);
+          else { ctx.moveTo(cx + Math.cos(w.a) * w.r0 * rr, cy + Math.sin(w.a) * w.r0 * rr); ctx.lineTo(cx + Math.cos(w.a) * w.r1 * rr, cy + Math.sin(w.a) * w.r1 * rr); }
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = "#e4b04a"; ctx.beginPath(); ctx.arc(cx + goalAt[0] * rr, cy + goalAt[1] * rr, rr * 0.07, 0, Math.PI * 2); ctx.fill();
+        const reveal = run && run.mode === "grow" ? smooth(0.3, 0.9, s.raise) : 1;
+        if (reveal > 0.02) {
+          const ma = clock * 0.9, mr = 0.82;
+          ctx.fillStyle = f.marble; ctx.strokeStyle = "rgba(0,0,0,0.4)"; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(cx + Math.cos(ma) * mr * rr, cy + Math.sin(ma) * mr * rr, rr * 0.055 * (0.35 + 0.65 * reveal), 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+        }
+      }
+      ctx.font = font(11); ctx.fillStyle = bg[0] + bg[1] + bg[2] > 380 ? "#2a2723" : "#e8e3dc";
+      ctx.fillText(FIN[s.fin].name, 12, 20);
+      // Timeline.
+      const mode = run ? run.mode : $("tMode").value, ph = run ? run.ph : phases(mode, +$("tB").value);
+      const tl = { x: 12, w: W - 24, y: stageH + 18, h: 16 }, span = Math.max(3.2, ph.end + 0.2), T = (t) => tl.x + (t / span) * tl.w;
+      ctx.fillStyle = css("--muted"); ctx.fillText("piece", tl.x, tl.y - 4);
+      const cols = [css("--accent"), css("--accent2"), css("--thread"), css("--wall"), css("--marble")];
+      ph.list.forEach(([label, a, b], i) => {
+        if (b - a < 1e-3) return;
+        ctx.fillStyle = label === "wait" || label === "build" ? css("--line") : cols[i % cols.length];
+        ctx.fillRect(T(a), tl.y, Math.max(1, T(b) - T(a) - 1), tl.h);
+        ctx.fillStyle = css("--muted");
+        if (T(b) - T(a) > 46) ctx.fillText(label, T(a) + 4, tl.y + tl.h + 13);
+      });
+      const wy = tl.y + tl.h + 30;
+      ctx.fillStyle = css("--muted"); ctx.fillText("worker", tl.x, wy - 4);
+      ctx.fillStyle = css("--stage-ink"); ctx.fillRect(T(ph.request), wy, Math.max(1, T(ph.ready) - T(ph.request)), 8);
+      ctx.fillStyle = css("--ink"); ctx.fillRect(T(ph.ready) - 1, wy - 3, 2, 14);
+      if (run) { ctx.fillStyle = css("--ink"); ctx.fillRect(T(Math.min(run.t, span)) - 1, tl.y - 6, 2, wy + 14 - tl.y + 6); }
+      $("tOut").innerHTML = `<span>new piece settled after <b>${ph.end.toFixed(2)} s</b></span><span>worker asked at <b>${ph.request.toFixed(2)} s</b></span><span>ready at <b>${ph.ready.toFixed(2)} s</b></span>`;
+    });
+    function go() {
+      if (run) return;
+      const mode = $("tMode").value;
+      bgFrom = cur; bgMix = 0;
+      run = { mode, from: cur, to: next, t: 0, ph: phases(mode, +$("tB").value), width: 1 };
+    }
+    $("tGo").addEventListener("click", () => { go(); if (reduce && run) { run.t = run.ph.end; finish(); } });
+    function finish() { cur = run.to; next = (cur + 1) % FIN.length; bgFrom = cur; bgMix = 1; run = null; view.redraw(); }
+    $("tMode").addEventListener("change", view.redraw);
+    $("tB").addEventListener("input", () => { $("tBo").textContent = (+$("tB").value).toFixed(2) + " s"; view.redraw(); });
+    if (reduce) view.redraw();
+    else animate(canvas, (dt) => {
+      clock += dt;
+      if (run) {
+        run.t += dt;
+        if (run.mode === "slide" || run.t >= 0.62) bgMix += (1 - bgMix) * (1 - Math.exp(-dt * 2.2));
+        if (stateAt(run, run.t).done) { finish(); return; }
+      }
+      view.redraw();
+    });
+  }
+})();
+</script>
+</body>
+</html>

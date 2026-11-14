@@ -27,8 +27,7 @@ every loop of the knot without the ball ever falling out.
 - **M** or the speaker button: toggle sound.
 - With the `steady` solver (the default), the marble rolls slowly on gentle slopes while the piece follows it with
   capped angular speed (1.2 rad/s) and acceleration (2 rad/s²), using the smallest rotation that slopes the surface
-  under the marble. It also turns slowly about the vertical to bring the marble round to the side facing the camera,
-  and when the piece still hides it, the orbit camera glides (gently ramped, at most 0.7 rad/s) to the nearest clear
+  under the marble toward a point ahead on the solution path. When the piece hides the marble, the orbit camera glides (gently ramped, at most 0.7 rad/s) to the nearest clear
   view (`view.js`; it leaves the camera alone for 3 s after you orbit or zoom). It favours keeping the marble in view
   over reaching the Goal cup; when it does arrive, the walls sink in a wave and a fresh labyrinth rises.
 - **Solver** picks the auto tilt: `steady` (above), `original`, the first version, which holds a full orientation
@@ -76,13 +75,14 @@ every loop of the knot without the ball ever falling out.
 ## Floor reflections
 
 On the high and capture quality tiers, glossy floors mirror the walls and the marble (**Floor reflections** toggles it;
-**Reflections** sets the strength and **Reflection reach** how far, in wall heights, they fade and blur). Each floor pixel's reflection
-ray marches the walls' distance field: the maze's wall capsules, uploaded as float textures and looked up through a
-40³ grid, extruded to the wall height (which follows the walls as they sink and rise). The marble is a sphere at its
-live position. The march stops once the ray is higher than the walls, widens into a cone on rougher floors for soft
-reflections, and lights what it hits with the key light and the studio. The result replaces the environment
-reflection where the ray hits, through `PipelineMaterial`'s opt-in `reflections` hook. It costs about 1 ms at
-1184×805 on the test laptop.
+**Reflections** sets the strength and **Reflection reach** how far, in wall heights, they fade and blur). Each glossy floor pixel's reflection
+ray is intersected directly with the walls' boxes, found through a 40³ grid of the maze's wall pieces (uploaded as float
+textures, four texels each: a bounding sphere that rejects most at once, then the box frame), and with the marble's
+sphere at its live position. Each box is widened by a blur cone that grows with distance, so rougher floors and
+farther walls give softer reflections, and coverage fades with distance (**Reflection reach**). What the ray hits is
+lit with the key light and the studio, and replaces the environment reflection there through `PipelineMaterial`'s
+opt-in `reflections` hook. It costs about 0.55 ms at 1264×705 on the test laptop (an earlier distance-field march
+cost 1.3 ms).
 
 ## Finishes
 
