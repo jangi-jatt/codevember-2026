@@ -114,7 +114,7 @@ const defaults = {
 };
 const params = fromDefaults(defaults);
 const touch = matchMedia("(pointer: coarse)").matches;
-const load = { studio: loadingStep(1), compile: loadingStep(3), trace: loadingStep(5) };
+const load = { studio: loadingStep(1, "Lighting the studio…"), compile: loadingStep(3, "Compiling shaders…"), trace: loadingStep(5, "Compiling the mirrors…") };
 
 const pipeline = new Pipeline(renderer, {
   background: 0x070808,

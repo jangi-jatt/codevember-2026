@@ -114,7 +114,7 @@ globalUniforms.specularShadow.value = 1;
 
 // Load progress: the studio, the studio HDR when the url asks for it, and the shader programs.
 const hdrFirst = new URLSearchParams(location.search).get("reflections") === "hdr";
-const load = { studio: loadingStep(1), hdr: hdrFirst ? loadingStep(6) : null, compile: loadingStep(4) };
+const load = { studio: loadingStep(1, "Lighting the studio…"), hdr: hdrFirst ? loadingStep(6, "Loading the environment…") : null, compile: loadingStep(4, "Compiling shaders…") };
 const studio = createStudioEnvironmentAsync(renderer, {
   keyDirection: KEY_DIRECTION,
   keyIntensity: 30,

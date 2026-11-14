@@ -89,10 +89,10 @@ const defaults = {
 const params = fromDefaults(defaults);
 
 const load = {
-  sound: loadingStep(2),
-  studio: loadingStep(1),
-  build: loadingStep(2),
-  compile: loadingStep(4),
+  build: loadingStep(2, "Building the labyrinth…"),
+  studio: loadingStep(1, "Lighting the studio…"),
+  sound: loadingStep(2, "Loading sounds…"),
+  compile: loadingStep(4, "Compiling shaders…"),
 };
 
 const pipeline = new Pipeline(renderer, {

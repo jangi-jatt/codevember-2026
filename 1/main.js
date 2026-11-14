@@ -81,7 +81,7 @@ const defaults = {
 
 const params = fromDefaults(defaults);
 // Load progress: the paper's textures, Ammo, the sounds, the studio and the shader programs.
-const load = { paper: loadingStep(1), physics: loadingStep(2), sound: loadingStep(1), studio: loadingStep(1), compile: loadingStep(4) };
+const load = { paper: loadingStep(1, "Making paper…"), physics: loadingStep(2, "Starting physics…"), studio: loadingStep(1, "Lighting the studio…"), sound: loadingStep(1, "Loading sounds…"), compile: loadingStep(4, "Compiling shaders…") };
 const touch = matchMedia("(pointer: coarse)").matches;
 
 const FLOOR_Y = -3.1;

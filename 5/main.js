@@ -43,7 +43,7 @@ const defaults = {
 };
 const params = fromDefaults(defaults);
 // Load progress: the seed shape, the first sculpture, the studio and the shader programs.
-const load = { field: loadingStep(1), build: loadingStep(3), studio: loadingStep(1), compile: loadingStep(4) };
+const load = { field: loadingStep(1, "Growing the pattern…"), build: loadingStep(3, "Meshing the stone…"), studio: loadingStep(1, "Lighting the studio…"), compile: loadingStep(4, "Compiling shaders…") };
 const touch = matchMedia("(pointer: coarse)").matches;
 
 const FLOOR_Y = -1;

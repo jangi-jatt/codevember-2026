@@ -19,7 +19,7 @@ const defaults = {
 };
 const params = fromDefaults(defaults);
 // Load progress: declare every step up front (weights roughly by how long each takes).
-const load = { studio: loadingStep(1), compile: loadingStep(4) };
+const load = { studio: loadingStep(1, "Lighting the studio…"), compile: loadingStep(4, "Compiling shaders…") };
 
 const pipeline = new Pipeline(renderer, {
   background: BACKGROUND,

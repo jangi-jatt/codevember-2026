@@ -26,7 +26,7 @@ const defaults = {
 
 const params = fromDefaults(defaults);
 // Load progress: the first shape and the shader programs.
-const load = { shape: loadingStep(1), compile: loadingStep(4) };
+const load = { shape: loadingStep(1, "Loading the shape…"), compile: loadingStep(4, "Compiling shaders…") };
 
 const pipeline = new Pipeline(renderer, {
   background: 0xffffff,

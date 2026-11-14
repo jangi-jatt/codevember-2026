@@ -15,7 +15,7 @@ import { createAutoChange } from "modules/autoChange.js";
 import { Easings } from "easings";
 
 // The pill fills while the studio loads, the shaders compile and the worker prepares and meshes the sculpture.
-const load = { studio: loadingStep(1), compile: loadingStep(2), sculpture: loadingStep(5) };
+const load = { studio: loadingStep(1, "Lighting the studio…"), compile: loadingStep(2, "Compiling shaders…"), sculpture: loadingStep(5, "Sculpting the porcelain…") };
 
 const pipeline = new Pipeline(renderer, {
   background: 0xd6d3cd,

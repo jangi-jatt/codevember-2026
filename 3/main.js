@@ -521,7 +521,7 @@ onRandomize(() => gui.randomizeAll());
 // The url's seed and params first, so the first shape built and warmed is the one asked for.
 applyUrlState();
 // Load progress: the first shape, the studio, the studio HDR when it is picked, and the shader programs.
-const load = { shape: loadingStep(3), studio: loadingStep(1), hdr: params.reflections() === "hdr" ? loadingStep(6) : null, compile: loadingStep(4) };
+const load = { shape: loadingStep(3, "Loading the shape…"), studio: loadingStep(1, "Lighting the studio…"), hdr: params.reflections() === "hdr" ? loadingStep(6, "Loading the environment…") : null, compile: loadingStep(4, "Compiling shaders…") };
 
 // Programs don't depend on the shape or the envs, so they compile while those load.
 const compiled = load.compile.track(Promise.all([pipeline.compileAsync(scene, camera), bake.compileAsync(renderer)]), 4);

@@ -68,7 +68,7 @@ let axleMeshes = [];
 function allMaterials() {
   return [...meshes, ...axleMeshes].map((o) => o.material ?? o.userData.material);
 }
-const load = { sound: loadingStep(1), rust: loadingStep(2), studio: loadingStep(1), machine: loadingStep(2), compile: loadingStep(3) };
+const load = { studio: loadingStep(1, "Lighting the studio…"), rust: loadingStep(2, "Loading rust textures…"), sound: loadingStep(1, "Loading sounds…"), machine: loadingStep(2, "Assembling the gears…"), compile: loadingStep(3, "Compiling shaders…") };
 // The rust's textures: grown corrosion fields and CC0 scans (see README and tools/).
 const rustFiles = ["corrosion.bin", "textures/color.jpg", "textures/normal.jpg", "textures/data.png"];
 const rustProgress = rustFiles.map(() => 0);

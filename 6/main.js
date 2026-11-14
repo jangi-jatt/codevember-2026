@@ -59,7 +59,7 @@ const defaults = {
 const params = fromDefaults(defaults);
 const capture = new URLSearchParams(location.search).has("capture");
 // Load progress: the sounds, the studio and the shader programs.
-const load = { sound: loadingStep(2), studio: loadingStep(1), compile: loadingStep(4) };
+const load = { studio: loadingStep(1, "Lighting the studio…"), sound: loadingStep(2, "Loading sounds…"), compile: loadingStep(4, "Compiling shaders…") };
 
 const pipeline = new Pipeline(renderer, {
   quality: lowEnd ? "low" : "auto",

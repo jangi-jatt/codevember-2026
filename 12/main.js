@@ -105,7 +105,7 @@ const defaults = {
   transition: "morph",
 };
 const params = fromDefaults(defaults);
-const load = { layout: loadingStep(1), studio: loadingStep(1), compile: loadingStep(4) };
+const load = { layout: loadingStep(1, "Laying out the feathers…"), studio: loadingStep(1, "Lighting the studio…"), compile: loadingStep(4, "Compiling shaders…") };
 
 // Soft studio colours for the light look (white is the plain studio).
 const BACKDROPS = { white: "#f3f2ef", blush: "#e6a99c", peach: "#ebb088", butter: "#e6cc7c", sage: "#a3c09a", mist: "#98b6d6", lavender: "#b5a5dc" };

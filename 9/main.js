@@ -50,7 +50,7 @@ const defaults = {
   autoTime: 12,
 };
 const params = fromDefaults(defaults);
-const load = { studio: loadingStep(1), sound: loadingStep(1), compile: loadingStep(4) };
+const load = { studio: loadingStep(1, "Lighting the studio…"), sound: loadingStep(1, "Loading sounds…"), compile: loadingStep(4, "Compiling shaders…") };
 
 let volume;
 const pipeline = new Pipeline(renderer, {

@@ -435,7 +435,7 @@ const defaults = {
 // The low tier starts without the studio (as its default, so the url doesn't record it).
 if (new URLSearchParams(location.search).get("quality") === "low") defaults.studio = false;
 const params = fromDefaults(defaults);
-const load = { studio: loadingStep(1), build: loadingStep(1), sound: loadingStep(1), compile: loadingStep(1) };
+const load = { studio: loadingStep(1, "Lighting the studio…"), build: loadingStep(1, "Etching the pattern…"), sound: loadingStep(1, "Loading sounds…"), compile: loadingStep(1, "Compiling shaders…") };
 // three's check of every program's info log stalls the frame a program is first used in.
 renderer.debug.checkShaderErrors = new URLSearchParams(location.search).has("debug");
 
