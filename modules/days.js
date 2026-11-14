@@ -33,12 +33,16 @@ const prompts = [
   "Dissolve",
 ];
 
-const published = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+const published = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13];
+
+// Days with an explainer.html, linked as "How it works" from their nav.
+const explained = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
 
 const days = prompts.map((prompt, i) => ({
   day: i + 1,
   prompt,
   title: published.includes(i + 1) ? prompt : "",
+  explainer: explained.includes(i + 1),
 }));
 
 const year = 2026;

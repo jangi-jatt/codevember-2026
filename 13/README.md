@@ -18,9 +18,13 @@ every loop of the knot without the ball ever falling out.
 - **R**: randomize shape, cell tiling, maze type, density and finish — sinks the current walls into the blank, shrinks
   the old piece away, calculates the new values and labyrinth unseen, expands the smooth new blank, and raises the new
   labyrinth walls in a wave (switching **Shape** follows the same five-stage choreography).
+- **Transition**: `grow` (above) or `slide`, where the piece leaves sideways with its walls up, the marble still
+  rolling, while the next arrives from the other side in its own finish and the backdrop blends between them.
+- **Fit size** scales every piece to the same outer radius.
+- Wherever the piece hides the marble, it shows through as a soft glowing rim.
 - **B**: return the marble to the Start dish.
 - **C** (or **Camera: follow**): toggle the car-style chase camera that perches behind and above the marble along the corridor ahead (**Follow height**, or scroll wheel, adjusts chase altitude).
-- **H** (or **Hint thread**): inlay Ariadne's golden thread along the shortest path to the Goal cup.
+- **H** (or **Hint thread**): inlay Ariadne's golden thread along the shortest path to the Goal cup (on by default).
 - **M** or the speaker button: toggle sound.
 - With the `steady` solver (the default), the marble rolls slowly on gentle slopes while the piece follows it with
   capped angular speed (1.2 rad/s) and acceleration (2 rad/s²), using the smallest rotation that slopes the surface
@@ -28,14 +32,12 @@ every loop of the knot without the ball ever falling out.
   and when the piece still hides it, the orbit camera glides (gently ramped, at most 0.7 rad/s) to the nearest clear
   view (`view.js`; it leaves the camera alone for 3 s after you orbit or zoom). It favours keeping the marble in view
   over reaching the Goal cup; when it does arrive, the walls sink in a wave and a fresh labyrinth rises.
-- Wherever the piece hides the marble (another strand, the far side, a wall), it shows through as a soft glowing
-  rim, drawn with an inverted depth test.
 - **Solver** picks the auto tilt: `steady` (above), `original`, the first version, which holds a full orientation
   with the aim facing the camera and brakes and weaves as it goes, or `optimal`, the same smallest rotation with
   tight, lively tracking that solves the most mazes (about 78 of 84 shape × cell builds within 4 minutes in
   simulation).
-- **Auto change** (on by default) waits while auto tilt is still getting closer to the Goal; a solve then randomizes
-  the whole piece, and a run that stops making progress for 20 s changes after the usual interval.
+- **Auto change** (on by default) randomizes every **Change every** seconds, whether or not auto tilt has reached the
+  Goal; a solve before then randomizes at once.
 
 ## Shapes, Tilings & Maze Types
 

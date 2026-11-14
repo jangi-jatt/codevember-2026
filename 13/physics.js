@@ -472,7 +472,9 @@ export const AUTO_PROFILES = {
     hubWeave: 0,
     lookAhead: 3.5,
     lookAheadMin: 0.09,
-    yawMax: 0.12,
+    rejoin: 1.5,
+    rejoinMin: 0.03,
+    yawMax: 0,
     hullBias: 0.4,
   },
   optimal: {
@@ -497,6 +499,8 @@ export const AUTO_PROFILES = {
     hubWeave: 0.35,
     lookAhead: 2.5,
     lookAheadMin: 0.07,
+    rejoin: 3,
+    rejoinMin: 0.06,
     yawMax: 0,
     hullBias: 0,
   },
@@ -527,7 +531,7 @@ function pursueSolutionPath(state, labyrinth, out, auto) {
       best = i;
     }
   }
-  const maxOff = Math.max(0.06, labyrinth.marbleRadius * 3);
+  const maxOff = Math.max(auto.rejoinMin, labyrinth.marbleRadius * auto.rejoin);
   if (bestSq > maxOff * maxOff) {
     for (let i = 0; i < path.length; i++) {
       const d = distSq(i);

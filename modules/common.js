@@ -553,8 +553,7 @@ function setDay(day = getDay()) {
     prev?.title ? link(`../${prev.day}/`, `${arrow("M11 3.5v9L4.5 8z")}<span>${prev.day}</span>`, `Previous: ${prev.day}. ${prev.title}`) : "",
     `<a class="home" href="../">${grid}<span>[vibe-]Codevember ${year}</span></a>`,
     next?.title ? link(`../${next.day}/`, `<span>${next.day}</span>${arrow("M5 3.5v9L11.5 8z")}`, `Next: ${next.day}. ${next.title}`) : "",
-    // Published days have an explainer.
-    entry?.title ? `<a class="explainer" href="explainer.html" title="How ${entry.prompt} works">${book}<span>How it works</span></a>` : "",
+    entry?.explainer ? `<a class="explainer" href="explainer.html" title="How ${entry.prompt} works">${book}<span>How it works</span></a>` : "",
   ].join("");
   document.body.append(info);
   queueFitNav();

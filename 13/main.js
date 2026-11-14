@@ -69,6 +69,8 @@ const defaults = {
   algorithm: "backtracker",
   density: 0.45,
   walls: "original",
+  transition: "grow",
+  fitSize: false,
   finish: "walnut & brass",
   cameraMode: "orbit",
   followHeight: 0.65,
@@ -78,7 +80,7 @@ const defaults = {
   reflections: 0.75,
   reflectionReach: 1.5,
   mirrorTest: false,
-  hint: false,
+  hint: true,
   autoPlay: true,
   solver: "steady",
   auto: true,
@@ -132,12 +134,14 @@ const studioPromise = load.studio.track(
 // ---------------------------------------------------------------------------
 // GUI & Controls Help
 // ---------------------------------------------------------------------------
-const gui = new GUI(setDay(13), document.querySelector("#gui-container"));
+const gui = new GUI(setDay(13), document.querySelector("#gui-container"), { expanded: false });
 gui.addSelect("Shape", params.shape, SHAPE_NAMES);
 gui.addSelect("Cells", params.tiling, TILING_NAMES);
 gui.addSelect("Maze", params.algorithm, ALGORITHM_NAMES);
 gui.addSlider("Density", params.density, 0.15, 0.9, 0.05);
 gui.addSelect("Walls", params.walls, WALL_STYLE_NAMES, { randomizable: false });
+gui.addSelect("Transition", params.transition, ["grow", "slide"], { randomizable: false });
+gui.addCheckbox("Fit size", params.fitSize, { randomizable: false });
 gui.addSelect("Finish", params.finish, FINISH_NAMES);
 gui.addSelect("Camera", params.cameraMode, ["orbit", "follow"], { randomizable: false });
 gui.addSlider("Follow height", params.followHeight, 0.25, 2.0, 0.05, { randomizable: false });
@@ -154,15 +158,12 @@ gui.addCheckbox("Auto tilt", params.autoPlay, { randomizable: false });
 gui.addSelect("Solver", params.solver, ["steady", "original", "optimal"], { randomizable: false });
 
 let transitionPhase = "idle";
-let solveBest = Infinity;
-let solveStuck = 0;
 const autoChange = createAutoChange({
   enabled: params.auto,
   every: params.autoTime,
   gui,
   max: 90,
-  // While auto tilt is still getting closer to the goal, let it finish; a solve randomizes by itself.
-  ready: () => transitionPhase === "idle" && !(params.autoPlay() && dragState.idleTime > 2 && solveStuck < 20),
+  ready: () => transitionPhase === "idle",
 });
 pipeline.addGUI(gui);
 gui.addSeparator();
@@ -521,7 +522,10 @@ function orientStartTowardCamera(immediate = false) {
     orientMatWorld.multiply(orientMatLocal.transpose());
     orientQuat.setFromRotationMatrix(orientMatWorld).normalize();
   } else {
-    desiredViewDir.copy(camera.position).normalize().add(new Vector3(0, 0.35, 0)).normalize();
+    // Mostly up, leaning toward the camera: the dish faces the viewer without starting the marble on a steep slope.
+    desiredViewDir.set(camera.position.x, 0, camera.position.z).normalize().multiplyScalar(0.45);
+    desiredViewDir.y += 1;
+    desiredViewDir.normalize();
     orientQuat.setFromUnitVectors(startNormalVec, desiredViewDir);
   }
   if (immediate) {
@@ -534,6 +538,8 @@ function orientStartTowardCamera(immediate = false) {
 }
 
 const shadowBoundSphere = new Sphere(new Vector3(0, 0, 0), 1.15);
+const FIT_RADIUS = 1.05;
+let fitScale = 1;
 
 // Labyrinths are built in a worker; a result is used only if it still matches the wanted build.
 const buildWorker = new Worker(new URL("./build.worker.js", import.meta.url), { type: "module" });
@@ -624,16 +630,20 @@ function installLabyrinth(next, orientImmediate) {
   shared.uPocketRadius.value = next.pocketRadius;
 
   // Place backdrop below lowest possible point of the rotated shape & fit shadow camera once cleanly!
-  const maxBound = Math.hypot(...next.shape.bounds);
+  // Fit size scales every piece to the same outer radius, measured on its floor.
+  const pos = next.floorGeometry.attributes.position.array;
+  let pieceRadius = 0;
+  for (let i = 0; i < pos.length; i += 3) pieceRadius = Math.max(pieceRadius, Math.hypot(pos[i], pos[i + 1], pos[i + 2]));
+  fitScale = params.fitSize() ? FIT_RADIUS / Math.max(pieceRadius, 1e-3) : 1;
+  const maxBound = Math.hypot(...next.shape.bounds) * fitScale;
   backdrop.place(-Math.min(1.22, maxBound));
   shadowBoundSphere.radius = maxBound + 0.08;
   pipeline.shadow.fit(shadowBoundSphere);
-  globalUniforms.occluders.value[0].set(0, 0, 0, Math.min(0.95, next.shape.bounds[1]));
+  occluderRadius = Math.min(0.95, next.shape.bounds[1]) * fitScale;
+  globalUniforms.occluders.value[0].set(rigGroup.position.x, rigGroup.position.y, rigGroup.position.z, occluderRadius);
   globalUniforms.occluderCount.value = 1;
 
   placeMarbleAtStart(marble, next);
-  solveBest = Infinity;
-  solveStuck = 0;
   resetChaseHeading();
   if (orientImmediate) {
     angularVel.set(0, 0, 0);
@@ -658,10 +668,14 @@ const scratchColor = new Color();
 
 let lookSettling = false;
 
-function updateFinishLook(wallDt, snap = false) {
+function updateFinishLook(wallDt, snap = false, snapBackground = snap) {
   const finishKey = shownFinishName || params.finish();
   const f = FINISHES[finishKey] ?? FINISHES["walnut & brass"];
   const k = snap || !shownLook.initialized ? 1 : 1 - Math.exp(-wallDt * 7);
+  // The backdrop and exposure blend over the whole slide (towards the incoming finish from the moment the old piece
+  // starts leaving), even though each piece shows its own finish.
+  const kBackground = snapBackground || !shownLook.initialized ? 1 : 1 - Math.exp(-wallDt * 2.2);
+  const fb = transitionPhase.startsWith("slide-") ? FINISHES[params.finish()] ?? f : f;
   shownLook.initialized = true;
 
   shownLook.floorColor.lerp(scratchColor.set(f.floorColor), k);
@@ -671,7 +685,7 @@ function updateFinishLook(wallDt, snap = false) {
   shownLook.rimColor.lerp(scratchColor.set(f.rimColor), k);
   shownLook.marbleColor.lerp(scratchColor.set(f.marbleColor), k);
   shownLook.marbleAccent.lerp(scratchColor.set(f.marbleAccent), k);
-  shownLook.bgColor.lerp(scratchColor.set(f.backdrop), k);
+  shownLook.bgColor.lerp(scratchColor.set(fb.backdrop), kBackground);
 
   floorMaterial.color.copy(shownLook.floorColor);
   floorMaterial.roughness += (f.floorRough - floorMaterial.roughness) * k;
@@ -699,15 +713,15 @@ function updateFinishLook(wallDt, snap = false) {
   hintMesh.visible = shared.uShowHint.value > 0.005 && wallRaise > 0.08 && rigGroup.visible;
 
   pipeline.background.copy(shownLook.bgColor);
-  pipeline.exposure += (f.exposure - pipeline.exposure) * k;
-  backdrop.setColor(f.backdrop, 0.74);
-  if (snap) backdrop.snap();
+  pipeline.exposure += (fb.exposure - pipeline.exposure) * kBackground;
+  backdrop.setColor(shownLook.bgColor, 0.74);
+  if (snapBackground) backdrop.snap();
   else backdrop.update(wallDt);
 
   // Uniform-only blends are invisible to the pipeline, so restart the still until they settle.
   scratchColor.set(f.wallColor);
   const colorGap = Math.abs(scratchColor.r - shownLook.wallColor.r) + Math.abs(scratchColor.g - shownLook.wallColor.g) + Math.abs(scratchColor.b - shownLook.wallColor.b);
-  lookSettling = !snap && colorGap + Math.abs(f.floorRough - floorMaterial.roughness) + Math.abs(f.exposure - pipeline.exposure) + Math.abs(targetHint - shared.uShowHint.value) > 1e-3;
+  lookSettling = !snap && colorGap + Math.abs(f.floorRough - floorMaterial.roughness) + Math.abs(fb.exposure - pipeline.exposure) + Math.abs(targetHint - shared.uShowHint.value) > 1e-3;
 }
 
 // ---------------------------------------------------------------------------
@@ -736,11 +750,82 @@ function rebuildAtBottom() {
   requestBuild();
 }
 
+// Slide transition: the piece leaves sideways with its walls up, and the next, built meanwhile, arrives from the other side.
+const SLIDE_TIME = 0.75;
+const slideAxis = new Vector3(1, 0, 0);
+let slideOffset = 0;
+let slideDistance = 3;
+let occluderRadius = 0.9;
+
+function startSlide() {
+  if (pendingRandomSeed !== null) {
+    const seedToApply = pendingRandomSeed;
+    pendingRandomSeed = null;
+    applyingAtBottom = true;
+    loadSeed(seedToApply);
+    applyingAtBottom = false;
+  }
+  requestBuild();
+  sound.silenceLoops();
+  sound.swoosh({ spinSpeed: 4.6 });
+  // Exits towards screen left, far enough that the whole piece clears the frame.
+  slideAxis.setFromMatrixColumn(camera.matrixWorld, 0).setY(0);
+  if (slideAxis.lengthSq() < 1e-6) slideAxis.set(1, 0, 0);
+  slideAxis.normalize();
+  const halfHeight = camera.position.length() * Math.tan((camera.fov * Math.PI) / 360);
+  slideDistance = halfHeight * camera.aspect + 1.5;
+  transitionPhase = "slide-out";
+  transitionProgress = 0;
+}
+
+function updateSlide(dt) {
+  wallRaise = 1;
+  marbleReveal = 1;
+  rigScale = 1;
+  wallMesh.visible = true;
+  marbleMesh.visible = true;
+  if (transitionPhase === "slide-out") {
+    transitionProgress = Math.min(1, transitionProgress + dt / SLIDE_TIME);
+    slideOffset = -slideDistance * transitionProgress * transitionProgress * transitionProgress;
+    if (transitionProgress >= 1) transitionPhase = "slide-swap";
+  } else if (transitionPhase === "slide-swap") {
+    const next = takeBuild();
+    if (next) {
+      pendingFullSwap = false;
+      randomizingSwap = false;
+      activeTransitionShrink = false;
+      shownFinishName = params.finish();
+      updateFinishLook(1, true, false);
+      slideOffset = slideDistance;
+      rigGroup.position.copy(slideAxis).multiplyScalar(slideOffset);
+      installLabyrinth(next, true);
+      // Arrive already rolling, along the first stretch of the path.
+      marble.vel.copy(marble.smoothAimDir).multiplyScalar(0.3);
+      transitionPhase = "slide-in";
+      transitionProgress = 0;
+      sound.swoosh({ spinSpeed: 4.2 });
+    }
+  } else if (transitionPhase === "slide-in") {
+    transitionProgress = Math.min(1, transitionProgress + dt / SLIDE_TIME);
+    const rem = 1 - transitionProgress;
+    slideOffset = slideDistance * rem * rem * rem;
+    if (transitionProgress >= 1) {
+      slideOffset = 0;
+      transitionPhase = "idle";
+    }
+  }
+}
+
 function updateTransitions(dt) {
   const fullSwapWanted = pendingFullSwap || params.shape() !== shownShape;
   const rebuildWanted = fullSwapWanted || desiredBuildKey() !== builtKey;
 
-  if (transitionPhase === "idle") {
+  if (transitionPhase === "idle" && fullSwapWanted && params.transition() === "slide") {
+    startSlide();
+  }
+  if (transitionPhase.startsWith("slide-")) {
+    updateSlide(dt);
+  } else if (transitionPhase === "idle") {
     if (!fullSwapWanted) {
       shownFinishName = params.finish();
       musicFade = 1;
@@ -908,8 +993,16 @@ function updateTransitions(dt) {
   sound.setMusicVolume(params.music());
   sound.setMusicFade(musicFade);
   shared.uWallRaise.value = wallRaise;
-  rigGroup.scale.setScalar(Math.max(0.0001, rigScale));
+  rigGroup.scale.setScalar(Math.max(0.0001, rigScale * fitScale));
   rigGroup.visible = transitionPhase !== "shape-hidden" && rigScale > 0.003;
+  const slid = rigGroup.position.lengthSq() > 0 || slideOffset !== 0;
+  rigGroup.position.copy(slideAxis).multiplyScalar(slideOffset);
+  if (slid) {
+    // The shadow camera and the contact occluder follow the piece while it slides.
+    shadowBoundSphere.center.copy(rigGroup.position);
+    pipeline.shadow.fit(shadowBoundSphere);
+    globalUniforms.occluders.value[0].set(rigGroup.position.x, rigGroup.position.y, rigGroup.position.z, occluderRadius);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -932,6 +1025,11 @@ const SOLVER_GAINS = {
   original: { gain: 2.25, max: 2.45, rate: 6.2 },
   optimal: { gain: 10, max: 8, rate: 20 },
 };
+
+// The marble rolls while the piece is idle, and also while it slides in or out with its walls up.
+function marbleInPlay() {
+  return transitionPhase === "idle" || transitionPhase === "slide-out" || transitionPhase === "slide-in";
+}
 
 function autoSteeringActive() {
   return params.autoPlay() && transitionPhase === "idle" && !marble.captured && !dragState.active && heldKeys.size === 0 && dragState.idleTime > 2.0;
@@ -972,7 +1070,7 @@ function updateRotation(dt, elapsed) {
     dragState.idleTime = 0;
   } else {
     dragState.idleTime += dt;
-    autoSteering = params.autoPlay() && transitionPhase === "idle" && !marble.captured && dragState.idleTime > 2.0;
+    autoSteering = params.autoPlay() && marbleInPlay() && !marble.captured && dragState.idleTime > 2.0;
     const original = params.solver() === "original";
     const gains = SOLVER_GAINS[params.solver()] ?? SOLVER_GAINS.original;
     // Coasting damps the spin; the newer solvers ease toward their own target instead.
@@ -1055,6 +1153,11 @@ await load.compile.track(pipeline.compileAsync(scene, camera), 3);
 
 window.app = {
   canvas: renderer.domElement,
+  // Recording handle: switch to a look ({ shape, tiling, finish, ... } panel values) through the usual transition.
+  nextLook(look) {
+    if (!look) return randomize();
+    for (const [key, value] of Object.entries(look)) params[key]?.set(value);
+  },
   params,
   pipeline,
   camera,
@@ -1451,7 +1554,7 @@ function onFrame({ time, dt, wallDtOverride }) {
   }
 
   const finishCfg = FINISHES[shownFinishName || params.finish()] ?? FINISHES["walnut & brass"];
-  const wallsActive = transitionPhase === "idle";
+  const wallsActive = marbleInPlay();
   const stepInfo = stepMarble(marble, currentLabyrinth, shapeQuat, wallsActive ? dt : 0, {
     gravity: 6.4 * params.gravity(),
     materialKind: finishCfg.acoustic,
@@ -1505,16 +1608,6 @@ function onFrame({ time, dt, wallDtOverride }) {
       facing,
       isGoalRim: stepInfo.impactGoalRim,
     });
-  }
-
-  if (currentLabyrinth && wallsActive && dt > 0) {
-    const d = currentLabyrinth.distToGoal[marble.currentCellId];
-    if (d < solveBest) {
-      solveBest = d;
-      solveStuck = 0;
-    } else {
-      solveStuck += dt;
-    }
   }
 
   if (stepInfo.justCaptured) {
