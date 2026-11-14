@@ -15,11 +15,10 @@ every loop of the knot without the ball ever falling out.
   coasts to a stop.
 - **Shift + drag** or **right-drag** (or drag while paused with **Space**) to orbit the camera; **scroll** or pinch to
   zoom.
-- **R**: randomize shape, cell tiling, maze type, density and finish — sinks the current walls into the blank, shrinks
-  the old piece away, calculates the new values and labyrinth unseen, expands the smooth new blank, and raises the new
-  labyrinth walls in a wave (switching **Shape** follows the same five-stage choreography).
-- **Transition**: `grow` (above) or `slide`, where the piece leaves sideways with its walls up, the marble still
-  rolling, while the next arrives from the other side in its own finish and the backdrop blends between them.
+- **R**: randomize shape, cell tiling, maze type, density and finish. With the default **Transition**, `slide`, the
+  piece leaves sideways with its walls up, the marble still rolling, while the next (built meanwhile) arrives from the
+  other side in its own finish. With `grow` it sinks its walls, shrinks away, and the new piece grows in and raises its
+  walls in a wave. Either way the backdrop blends between the two finishes.
 - **Fit size** scales every piece to the same outer radius.
 - Wherever the piece hides the marble, it shows through as a soft glowing rim.
 - **B**: return the marble to the Start dish.

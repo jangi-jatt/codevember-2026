@@ -69,7 +69,7 @@ const defaults = {
   algorithm: "backtracker",
   density: 0.45,
   walls: "original",
-  transition: "grow",
+  transition: "slide",
   fitSize: false,
   finish: "walnut & brass",
   cameraMode: "orbit",
@@ -672,10 +672,10 @@ function updateFinishLook(wallDt, snap = false, snapBackground = snap) {
   const finishKey = shownFinishName || params.finish();
   const f = FINISHES[finishKey] ?? FINISHES["walnut & brass"];
   const k = snap || !shownLook.initialized ? 1 : 1 - Math.exp(-wallDt * 7);
-  // The backdrop and exposure blend over the whole slide (towards the incoming finish from the moment the old piece
-  // starts leaving), even though each piece shows its own finish.
+  // During a transition the backdrop and exposure blend towards the incoming finish as soon as it's known, even though
+  // each piece shows its own finish.
   const kBackground = snapBackground || !shownLook.initialized ? 1 : 1 - Math.exp(-wallDt * 2.2);
-  const fb = transitionPhase.startsWith("slide-") ? FINISHES[params.finish()] ?? f : f;
+  const fb = transitionPhase !== "idle" ? FINISHES[params.finish()] ?? f : f;
   shownLook.initialized = true;
 
   shownLook.floorColor.lerp(scratchColor.set(f.floorColor), k);
@@ -746,7 +746,7 @@ function rebuildAtBottom() {
   pendingFullSwap = false;
   activeTransitionShrink = false;
   shownFinishName = params.finish();
-  updateFinishLook(1, true);
+  updateFinishLook(0, true, false);
   requestBuild();
 }
 
@@ -795,7 +795,7 @@ function updateSlide(dt) {
       randomizingSwap = false;
       activeTransitionShrink = false;
       shownFinishName = params.finish();
-      updateFinishLook(1, true, false);
+      updateFinishLook(0, true, false);
       slideOffset = slideDistance;
       rigGroup.position.copy(slideAxis).multiplyScalar(slideOffset);
       installLabyrinth(next, true);
