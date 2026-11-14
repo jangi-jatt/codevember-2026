@@ -348,13 +348,16 @@ function showSoundHint(needed = () => true) {
 
 // Load progress in the placeholder's pill. Declare every step up front, so the total is known from the start:
 // const step = loadingStep(weight); … step.set(0.5); … step.track(promise). The pill fills by weight.
+// Opt-in: loadingStep(weight, "Compiling shaders…") shows the label of the first unfinished labelled step in the pill;
+// without labels the pill keeps the page's own text.
 // track(promise, seconds) creeps toward the step's end over about that long, for work that can't report
 // its progress (shader compiles).
 const loadingSteps = [];
 let loadingShown = 0;
-function loadingStep(weight = 1) {
+function loadingStep(weight = 1, label = null) {
   const step = {
     weight,
+    label,
     value: 0,
     set(f) {
       step.value = Math.max(step.value, Math.min(1, f));
@@ -387,6 +390,11 @@ function showLoadingProgress() {
   loadingShown = Math.max(loadingShown, total > 0 ? value / total : 0);
   loading.classList.add("progress");
   span.style.setProperty("--progress", loadingShown);
+  if (loadingSteps.some((s) => s.label)) {
+    loading.dataset.text ??= span.textContent;
+    const current = loadingSteps.find((s) => s.label && s.value < 1);
+    span.textContent = current ? current.label : loading.dataset.text;
+  }
 }
 
 // fetch(), with onProgress(fraction) as the body arrives. Resolves to a Response once it is all in.
