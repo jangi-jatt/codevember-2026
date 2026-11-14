@@ -95,6 +95,8 @@ uniform float outerTransmit;
 uniform float innerReflect;
 uniform vec3 glassTint;
 uniform int bounces;
+// The bounces traceSculpture follows: all of them for the pixel's ray, fewer for its extra anti-aliasing rays.
+int traceBounces;
 uniform float lastWeight; // how much of the last bounce counts; the rest is the tail estimate
 uniform float tubeReach;
 uniform float pixelAngle;
@@ -360,7 +362,7 @@ vec4 traceSculpture(vec3 ro, vec3 rd, float tLimit, float travelledBefore, float
   float travelled = t + travelledFloor;
   bool alive = true, straight = !remask;
   vec3 cut = vec3(-1.0);
-  for (int b = 0; b < bounces; b++) {
+  for (int b = 0; b < traceBounces; b++) {
     used = float(b + 1);
     if (b == bounces - 1 && lastWeight < 1.0) cut = color + thr * tail;
     // The segment starts somewhere else than where its mask was taken (a shard's offset).
@@ -578,6 +580,8 @@ void main() {
       behind = roomGlow;
     }
     float tEntry, used;
+    // The extra rays smooth the lattice's nearer edges; its deep reflections are footprint-filtered already.
+    traceBounces = k == 1 || k == 2 ? min(bounces, max(bounces / 2, deepStart + 2)) : bounces;
     vec4 c = traceSculpture(mirrored ? surface : cameraPos, rd, mirrored ? 1e9 : tLim, mirrored ? tLimit : 0.0, mirrored ? floorRough : 0.0, behind, tEntry, used);
     if (mirrored) {
       // A satin floor: Fresnel from a dielectric, more at grazing angles.
