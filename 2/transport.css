@@ -112,3 +112,10 @@
     width: calc(100% - 20px - env(safe-area-inset-left) - env(safe-area-inset-right));
   }
 }
+
+/* The auto change countdown sits above the transport, which takes the bottom on desktop. */
+@media (min-width: 951px) {
+  #auto-change {
+    bottom: calc(20px + 50px + 10px + env(safe-area-inset-bottom));
+  }
+}

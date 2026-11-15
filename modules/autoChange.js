@@ -3,6 +3,7 @@
 // `ready()` is false (e.g. a layout still landing). Off under ?capture, which drives its own changes.
 import { signal } from "guspira";
 import { onRandomize, onPause, randomize, isRunning } from "common";
+import { days } from "./days.js";
 
 const capture = new URLSearchParams(location.search).has("capture");
 
@@ -20,6 +21,8 @@ function createAutoChange({ enabled, every, gui, min = 5, max = 60, ready = () =
   addEventListener("pointerdown", () => ((held = true), restart()), opts);
   for (const e of ["pointerup", "pointercancel"]) addEventListener(e, () => ((held = false), restart()), opts);
   for (const e of ["wheel", "keydown"]) addEventListener(e, restart, opts);
+
+  const pill = capture ? null : createPill();
 
   if (gui) {
     gui.addCheckbox("Auto change", enabled, { randomizable: false });
@@ -43,6 +46,15 @@ function createAutoChange({ enabled, every, gui, min = 5, max = 60, ready = () =
     }
     const text = describe();
     if (text !== status.peek()) status.set(text);
+    if (pill) {
+      const shown = on() && isRunning();
+      pill.root.classList.toggle("shown", shown);
+      pill.root.classList.toggle("waiting", held || !ready());
+      if (shown) {
+        pill.set(held ? "Waiting…" : !ready() ? "Randomizing…" : `${pill.prefix} ${Math.max(1, Math.ceil(every() - elapsed))} s`);
+        pill.root.style.setProperty("--left", Math.max(0, 1 - elapsed / every()));
+      }
+    }
   }
 
   return {
@@ -50,6 +62,30 @@ function createAutoChange({ enabled, every, gui, min = 5, max = 60, ready = () =
     restart,
     get remaining() {
       return on() ? Math.max(0, every() - elapsed) : Infinity;
+    },
+  };
+}
+
+// On-screen countdown: a pill like the loader's at the bottom centre, its fill shrinking to the next change.
+function createPill() {
+  const root = document.createElement("div");
+  root.id = "auto-change";
+  const text = document.createElement("span");
+  root.append(text);
+  document.body.append(root);
+  const day = parseInt(location.pathname.split("/").at(-2));
+  const prompt = days.find((d) => d.day === day)?.prompt;
+  let sized = false;
+  return {
+    root,
+    prefix: prompt ? `New ${prompt.toLowerCase()} in` : "Next change in",
+    // The pill's width follows the text, animated.
+    set(label) {
+      if (text.textContent === label && sized) return;
+      text.textContent = label;
+      const w = text.offsetWidth;
+      sized = w > 0;
+      if (sized) root.style.width = `${w}px`;
     },
   };
 }

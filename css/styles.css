@@ -233,6 +233,66 @@ canvas {
   display: none;
 }
 
+/* Auto change countdown (autoChange.js): the fill shrinks to the next change. */
+#auto-change {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom));
+  z-index: 4;
+  transform: translateX(-50%);
+  box-sizing: content-box;
+  overflow: hidden;
+  isolation: isolate;
+  padding: 8px 16px;
+  border-radius: 999px;
+  background: var(--loading-pill, rgb(32, 32, 32));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14), 0 2px 10px rgba(0, 0, 0, 0.18);
+  color: var(--loading-pill-color, rgb(240, 240, 240));
+  font-family: "Segoe UI", sans-serif;
+  font-size: 13px;
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 0.4s ease,
+    width 0.35s ease;
+
+  span {
+    display: inline-block;
+  }
+
+  &::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background: var(--loading-progress, rgba(255, 255, 255, 0.16));
+    transform-origin: left;
+    transform: scaleX(var(--left, 1));
+  }
+
+  &.shown {
+    opacity: 1;
+  }
+
+  &.shown.waiting {
+    opacity: 0.6;
+  }
+}
+
+@media (max-width: 950px) {
+  /* Above the collapsed panel along the bottom. */
+  #auto-change {
+    bottom: calc(10px + var(--header-size) + 10px + env(safe-area-inset-bottom));
+  }
+}
+
+.hide-ui #auto-change {
+  display: none;
+}
+
 /* Placeholder from first paint until the sketch's first frame (see ready() in common.js). */
 #loading {
   position: fixed;
