@@ -90,6 +90,8 @@
     wrap(pl.dof, "accumulate", "dof");
     wrapStages(pl.gi, "gi");
     wrapStages(pl.shadowMask, "shadowMask");
+    // A day can time its own work as segments: window.app.perfSegments(wrap) calls wrap(obj, method, label).
+    window.app.perfSegments?.(wrap);
   };
   const collect = (count) =>
     new Promise((resolve) => {

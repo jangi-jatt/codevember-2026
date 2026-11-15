@@ -50,7 +50,30 @@ function randomDirection(rand, out = new Vector3()) {
 // walls along its torn edge. `shell` runs from 1 on the outside to 0 on the inside.
 // `warp` is how much the tears wander; `stretch` < 1 draws pieces out into splinters pointing away
 // from `impact`, a point on or near the surface.
-function peelPieces({ seed, count, shape, thickness = 0.09, warp: wander = 0.22, stretch = 1, impact = null }) {
+function peelPieces(options) {
+  const steps = peelSteps(options);
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+  }
+}
+
+// peelPieces spread over frames: works for about budget ms, then waits for nextFrame().
+async function peelPiecesAsync(options, nextFrame, budget = 6) {
+  const steps = peelSteps(options);
+  let start = performance.now();
+  for (;;) {
+    const step = steps.next();
+    if (step.done) return step.value;
+    if (performance.now() - start > budget) {
+      await nextFrame();
+      start = performance.now();
+    }
+  }
+}
+
+// peelPieces' work, pausing (yield) between slices.
+function* peelSteps({ seed, count, shape, thickness = 0.09, warp: wander = 0.22, stretch = 1, impact = null }) {
   const rand = mulberry32(seed);
   // Centres spread evenly: the farthest of a few random candidates each time.
   const candidates = Array.from({ length: count * 12 }, () => shape.sample(rand));
@@ -61,6 +84,7 @@ function peelPieces({ seed, count, shape, thickness = 0.09, warp: wander = 0.22,
     for (let i = 1; i < candidates.length; i++) if (nearest[i] > nearest[best]) best = i;
     centres.push(candidates[best]);
     for (let i = 0; i < candidates.length; i++) nearest[i] = Math.min(nearest[i], candidates[i].distanceToSquared(candidates[best]));
+    yield;
   }
   const warped = new Vector3();
   const warp = (p) => {
@@ -108,9 +132,14 @@ function peelPieces({ seed, count, shape, thickness = 0.09, warp: wander = 0.22,
   const vertices = [];
   for (let i = 0; i < position.length; i += 3)
     vertices.push({ p: new Vector3(position[i], position[i + 1], position[i + 2]), n: new Vector3(normal[i], normal[i + 1], normal[i + 2]), room: room[i / 3] });
-  const owners = vertices.map((v) => owner(v.p));
+  const owners = [];
+  for (let i = 0; i < vertices.length; i++) {
+    owners.push(owner(vertices[i].p));
+    if (i % 256 === 255) yield;
+  }
   const polygons = centres.map(() => []);
   for (let t = 0; t < index.length; t += 3) {
+    if (t % 768 === 765) yield;
     const tri = [vertices[index[t]], vertices[index[t + 1]], vertices[index[t + 2]]];
     const o = [owners[index[t]], owners[index[t + 1]], owners[index[t + 2]]];
     const distinct = [...new Set(o)];
@@ -135,8 +164,14 @@ function peelPieces({ seed, count, shape, thickness = 0.09, warp: wander = 0.22,
   }
 
   const _in = new Vector3();
-  return polygons
-    .map((polys) => {
+  const pieces = [];
+  for (const polys of polygons) {
+    yield;
+    pieces.push(peel(polys));
+  }
+  return pieces.filter(Boolean);
+
+  function peel(polys) {
       if (!polys.length) return null;
       const P = [], N = [], S = [];
       const push = (p, n, sh) => {
@@ -192,8 +227,7 @@ function peelPieces({ seed, count, shape, thickness = 0.09, warp: wander = 0.22,
       // Flies out along the way it faced, leaning away from the middle.
       const direction = facing.normalize().add(centre.clone().normalize().multiplyScalar(0.5)).normalize();
       return { geometry, centre, direction, tear };
-    })
-    .filter(Boolean);
+  }
 }
 
 function Float32Attribute(values) {
@@ -269,4 +303,4 @@ function chipGeometry(seed, sides = 4) {
   return geometry;
 }
 
-export { peelPieces, fleshGeometry, sacGeometry, chipGeometry, mulberry32, noise3, randomDirection };
+export { peelPieces, peelPiecesAsync, fleshGeometry, sacGeometry, chipGeometry, mulberry32, noise3, randomDirection };

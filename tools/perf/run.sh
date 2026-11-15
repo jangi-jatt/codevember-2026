@@ -53,7 +53,8 @@ build() {
   shift 2
   local days=("$@")
   [ ${#days[@]} -eq 0 ] && days=("${DAYS[@]}")
-  local PATHS=(modules shaders third_party assets css "${days[@]}")
+  # PERF_EXTRA: more folders the days load from (e.g. "2 11" for a day importing their modules).
+  local PATHS=(modules shaders third_party assets css "${days[@]}" ${PERF_EXTRA:-})
   set -- "$dir" "$ref"
   mkdir -p "$1"
   if [ -n "$2" ] && [ -d "$2" ]; then

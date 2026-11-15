@@ -1,0 +1,583 @@
+import { fromDefaults, renderer, camera, controls, render, onResize, onPause, addKey, setRunning, onRandomize, applyUrlState, keysHelp, setDay, showHint, loadingStep, addActionButton, showSoundHint } from "common";
+import { createMusic } from "./music.js";
+import { GUI } from "guspira";
+import { Scene, Mesh, Group, Vector2, Vector3, Color, MathUtils, Matrix4, Quaternion } from "three";
+import { Pipeline } from "modules/pipeline/Pipeline.js";
+import { createAutoChange } from "modules/autoChange.js";
+import { SHAPE_LIST, buildSurfaceGeometry } from "./geometries.js";
+import { LOOK_PRESETS, createHologramUniforms, createHologramMaterial } from "./hologram.js";
+import { createDiorama, SCENES, braggReplay } from "./diorama.js";
+import { preloadShatterForms } from "./shatter.js";
+import { loadFingerprints, createSmudges } from "./smudge.js";
+import { createTunnel } from "./tunnel.js";
+import { createCardOver } from "./cardOver.js";
+import { nativeRandom } from "modules/random.js";
+
+const BACKGROUND = 0x000000;
+const CARD_STYLES = { card: 1, glass: 2 };
+// Motion blur's shutter (s): the tunnel blurs in its own shader along its streaming, the card in cardOver by its turning.
+const SHUTTER = 1 / 50;
+// Paused, the frame is shown still: no blur.
+let paused = false;
+onPause((running) => (paused = !running));
+
+const defaults = {
+  shape: "card",
+  scene: "gears",
+  machines: 1,
+  look: "spectrum",
+  colour: 575,
+  bandwidth: 35,
+  swelling: 1,
+  zone: 80,
+  dispersion: 2,
+  border: 0.06,
+  foil: 1.75,
+  fingerprints: 1,
+  depth: 1,
+  brightness: 0.4,
+  rings: 0.45,
+  bowl: 1,
+  ringCount: 9,
+  dash: 0.6,
+  haze: 0.03,
+  ghost: 0.25,
+  graze: 0.8,
+  wear: 0.85,
+  sway: 1,
+  orbit: 1,
+  roll: 0.25,
+  bend: 1,
+  streaks: false,
+  dots: false,
+  speed: 14,
+  blur: true,
+  auto: true,
+  autoTime: 10,
+};
+const params = fromDefaults(defaults);
+const load = {
+  scene: loadingStep(2, "Building the scene…"),
+  prints: loadingStep(1, "Leaving fingerprints…"),
+  music: loadingStep(2, "Loading the music…"),
+  compile: loadingStep(4, "Compiling shaders…"),
+};
+
+const pipeline = new Pipeline(renderer, {
+  background: BACKGROUND,
+  exposure: 1,
+  bloomStrength: 0.22,
+  saturation: 1.15,
+  vignette: 0.3,
+  grain: 0.02,
+  shadow: { autoFit: true, denoise: true },
+  // The tunnel is all light and the card's frame lies in it: no AO, bounce light or cast shadows to show (their history
+  // would lag behind the tunnel's streaming).
+  gi: false,
+  composite: (hdr, info) => cardOver.composite(hdr, info),
+});
+const cardOver = createCardOver(renderer, pipeline);
+const mobile = pipeline.quality === "medium" || pipeline.quality === "low";
+
+// Randomizing picks from [min, max] instead of the slider's whole range.
+function randomIn(controller, param, min, max, step) {
+  controller.randomize = () => param.set(Math.round((min + Math.random() * (max - min)) / step) * step);
+}
+
+const gui = new GUI(setDay(), document.querySelector("#gui-container"), { expanded: true });
+gui.addSection("Card");
+gui.addSelect("Card", params.shape, SHAPE_LIST.map((s) => s.id));
+gui.addSelect("Scene", params.scene, SCENES);
+gui.addSlider("Seed", params.machines, 1, 999, 1);
+randomIn(gui.addSlider("Border", params.border, 0.01, 0.2, 0.005, { visibleWhen: () => params.shape() === "card" }), params.border, 0.05, 0.09, 0.005);
+randomIn(gui.addSlider("Foil", params.foil, 0, 2, 0.01, { visibleWhen: () => params.shape() === "card" }), params.foil, 1.5, 2, 0.01);
+gui.addSection("Hologram");
+gui.addSlider("Colour (nm)", params.colour, 500, 640, 1);
+randomIn(gui.addSlider("Bandwidth (nm)", params.bandwidth, 0, 200, 1), params.bandwidth, 0, 40, 1);
+gui.addSlider("Swelling", params.swelling, 0, 2, 0.01);
+gui.addSlider("Viewing zone (°)", params.zone, 10, 80, 1, { randomizable: false });
+randomIn(gui.addSlider("Dispersion", params.dispersion, 0, 3, 0.01), params.dispersion, 1.5, 3, 0.01);
+gui.addSelect("Look", params.look, Object.keys(LOOK_PRESETS));
+gui.addSlider("Depth", params.depth, 0.4, 1.6, 0.01);
+gui.addSlider("Brightness", params.brightness, 0.1, 1.5, 0.01, { randomizable: false });
+gui.addSlider("Ghost", params.ghost, 0, 0.3, 0.01);
+gui.addSlider("Grazing distortion", params.graze, 0, 2, 0.01);
+gui.addSection("Rings");
+gui.addSlider("Rings", params.rings, 0, 2, 0.01);
+gui.addSlider("Bowl depth", params.bowl, 0.3, 2, 0.01);
+gui.addSlider("Ring count", params.ringCount, 4, 20, 1);
+gui.addSlider("Dashes", params.dash, 0.2, 1, 0.01);
+randomIn(gui.addSlider("Haze", params.haze, 0, 1, 0.01), params.haze, 0, 0.1, 0.01);
+gui.addSection("Glass");
+gui.addSlider("Wear", params.wear, 0, 1.5, 0.01);
+gui.addSlider("Fingerprints", params.fingerprints, 0, 2, 0.01);
+gui.addSection("Motion");
+gui.addSlider("Sway", params.sway, 0, 2, 0.01, { randomizable: false });
+gui.addSlider("Orbit", params.orbit, 0, 2, 0.01, { randomizable: false });
+gui.addSlider("Roll", params.roll, -1, 1, 0.01, { randomizable: false });
+gui.addSection("Tunnel");
+gui.addCheckbox("Light streaks", params.streaks);
+gui.addCheckbox("Dot spiral", params.dots);
+gui.addSlider("Bend", params.bend, 0, 2, 0.01, { randomizable: false });
+gui.addSlider("Speed (m/s)", params.speed, 0, 40, 0.1, { randomizable: false });
+gui.addCheckbox("Motion blur", params.blur, { randomizable: false });
+const autoChange = createAutoChange({ enabled: params.auto, every: params.autoTime, gui, ready: () => flip.state === "idle" });
+pipeline.addGUI(gui);
+// The soundtrack, downloaded while the page loads; M or the button turns it on and off, pausing pauses it.
+const music = createMusic({ onProgress: load.music.set });
+load.music.track(music.loaded);
+const soundButton = addActionButton("../assets/sound.svg", "Sound", () => toggleSound());
+function toggleSound() {
+  music.setEnabled(!music.enabled);
+  soundButton.querySelector("img").src = `../assets/${music.enabled ? "sound" : "sound-off"}.svg`;
+}
+addKey("KeyM", "toggle sound", toggleSound);
+onPause((running) => music.setPaused(!running));
+showSoundHint(() => !music.running);
+showHint("Drag to spin the card · move the pointer to light it · R for a new card", "Drag to spin the card · tap {randomize} for a new card");
+gui.show();
+
+const scene = new Scene();
+const tunnel = createTunnel(renderer);
+tunnel.update(0, 0);
+scene.add(tunnel.mesh);
+
+const diorama = createDiorama(renderer, { shadowSize: mobile ? 1024 : 2048 });
+// The window render's size, as a share of the screen's pixels.
+const PORTAL_SCALE = mobile ? 0.5 : 1;
+
+const u = createHologramUniforms({ portal: diorama.texture, replays: diorama.replayTextures, look: params.look() });
+const hero = new Group();
+scene.add(hero);
+// One program per card (a trading card, a glass plate), both compiled up front so a flip never waits.
+const materials = {};
+const geometries = {};
+const mesh = new Mesh();
+mesh.userData.noShadow = true;
+mesh.rotation.order = "YXZ";
+mesh.visible = false;
+hero.add(mesh);
+for (const shape of Object.keys(CARD_STYLES)) {
+  geometries[shape] = buildSurfaceGeometry(shape);
+  materials[shape] = createHologramMaterial(u, { card: CARD_STYLES[shape] });
+}
+function putCard(shape) {
+  cardOver.setCard(mesh);
+  mesh.geometry = geometries[shape];
+  mesh.material = materials[shape];
+  mesh.visible = true;
+}
+
+camera.userData.baseFov = 35;
+camera.position.set(0, 0, 5.6);
+// Far enough to see down the tunnel behind the card when the camera comes round.
+camera.far = 500;
+camera.updateProjectionMatrix();
+controls.target.set(0, 0, 0);
+// The camera is placed by the orbit below; the wheel only sets how far out it is.
+let rollAngle = 0;
+// A snapshot of the motion (C copies it), so a moment can be shared and replayed with ?state=.
+let timeShift = 0, lastTime = 0;
+let turnRate = 0;
+const _qNow = new Quaternion(), _qPrev = new Quaternion(), _qDelta = new Quaternion();
+let orbitPhase = 0, orbitR = 0, zoom = 5.6, fovBase = 35;
+controls.enabled = false;
+renderer.domElement.addEventListener("wheel", (e) => {
+  zoom = MathUtils.clamp(zoom * Math.exp(e.deltaY * 0.001), 3, 12);
+  e.preventDefault();
+}, { passive: false });
+
+// Dragging turns the card the way the pointer moves on screen, whatever its pose (a trackball in the camera's frame):
+// it keeps turning when let go, and once slow settles back to facing the camera (either face).
+const spin = { q: new Quaternion(), w: new Vector3(), id: null, x: 0, y: 0, t: 0 };
+const _dq = new Quaternion(), _axis = new Vector3(), _camQ = new Quaternion(), _front = new Quaternion(), _back = new Quaternion(0, 1, 0, 0);
+const canvas = renderer.domElement;
+canvas.addEventListener("pointerdown", (e) => {
+  if (spin.id !== null) return;
+  spin.id = e.pointerId;
+  spin.x = e.clientX;
+  spin.y = e.clientY;
+  spin.t = performance.now();
+  spin.w.set(0, 0, 0);
+  canvas.setPointerCapture(e.pointerId);
+});
+function turnBy(ax, ay, angle) {
+  if (angle < 1e-6) return;
+  spin.q.premultiply(_dq.setFromAxisAngle(_axis.set(ax, ay, 0).normalize(), angle));
+}
+canvas.addEventListener("pointermove", (e) => {
+  if (e.pointerId !== spin.id) return;
+  const k = 4 / innerHeight;
+  const dx = (e.clientX - spin.x) * k, dy = (e.clientY - spin.y) * k;
+  const now = performance.now();
+  const dt = Math.max(8, now - spin.t) / 1000;
+  // Right turns it about the view's up axis, down about its right axis (the top comes toward the viewer).
+  turnBy(dy, dx, Math.hypot(dx, dy));
+  spin.w.lerp(_axis.set(dy / dt, dx / dt, 0), 0.5);
+  spin.x = e.clientX;
+  spin.y = e.clientY;
+  spin.t = now;
+});
+const release = (e) => {
+  if (e.pointerId !== spin.id) return;
+  spin.id = null;
+  // A drag that stopped before letting go doesn't fling.
+  if (performance.now() - spin.t > 80) spin.w.set(0, 0, 0);
+};
+canvas.addEventListener("pointerup", release);
+canvas.addEventListener("pointercancel", release);
+function updateSpin(dt) {
+  if (spin.id !== null) return;
+  const speed = spin.w.length();
+  turnBy(spin.w.x, spin.w.y, speed * dt);
+  spin.w.multiplyScalar(Math.exp(-1.5 * dt));
+  // A gentle pull back to facing that fades in as the turn slows, rather than switching on.
+  const pull = 0.7 * (1 - MathUtils.smoothstep(speed, 0.5, 4));
+  if (pull > 0) {
+    const target = Math.abs(spin.q.dot(_front)) >= Math.abs(spin.q.dot(_back)) ? _front : _back;
+    spin.q.slerp(target, 1 - Math.exp(-pull * dt));
+  }
+}
+onResize((w, h, dpr) => {
+  const t = Math.tan(MathUtils.degToRad(35) / 2);
+  fovBase = w < h ? MathUtils.radToDeg(2 * Math.atan(t / (w / h))) : 35;
+  camera.fov = fovBase;
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+  pipeline.setSize(w, h, dpr);
+  u.uScreen.value.set(Math.round(w * dpr), Math.round(h * dpr));
+  diorama.setSize(Math.max(1, Math.round(w * dpr * PORTAL_SCALE)), Math.max(1, Math.round(h * dpr * PORTAL_SCALE)));
+});
+
+// The look's colours, eased to on a change.
+const target = { look: { ...LOOK_PRESETS[params.look()] }, tint: new Color(), ramp: [0, 1, 2, 3, 4].map(() => new Color()) };
+function setLook(name, snap = false) {
+  const look = LOOK_PRESETS[name] ?? LOOK_PRESETS.spectrum;
+  Object.assign(target.look, look);
+  target.tint.set(look.tintColor);
+  look.stops.forEach((hex, i) => target.ramp[i].set(hex));
+  if (snap) easeLook(1);
+}
+const RAMPS = ["uRamp1", "uRamp2", "uRamp3", "uRamp4", "uRamp5"];
+const EASED = { uRampMix: "rampMix", uRampCycles: "rampCycles", uSpacing: "spacing", uOrder2: "order2", uOrder3: "order3", uHueShift: "hueShift", uHoloBrightness: "holoBrightness", uHoloSaturation: "holoSaturation", uPurity: "purity", uSoftClip: "softClip", uTintMix: "tintMix", uPlateReflection: "plateReflection" };
+function easeLook(k) {
+  u.uTintColor.value.lerp(target.tint, k);
+  RAMPS.forEach((r, i) => u[r].value.lerp(target.ramp[i], k));
+  for (const [name, key] of Object.entries(EASED)) u[name].value += (target.look[key] - u[name].value) * k;
+}
+
+// A new card is prepared in the background (its scene merged and lit, its prints drawn, a slice a frame) while the card
+// spins, and the new one goes on as it passes edge-on.
+const shown = { shape: "", scene: "" };
+const sceneKey = (v) => v.scene + "|" + v.machines;
+const flip = { state: "idle", angle: 0, omega: 0, values: null, prepared: null, swapped: false, target: 0, start: 0, duration: 1, t: 0, request: 0 };
+// Spin rate while the next card is made (rad/s), and how it winds down after.
+const SPIN = 16;
+function requestCard(values) {
+  const id = ++flip.request;
+  flip.state = "preparing";
+  flip.values = values;
+  flip.swapped = false;
+  const sceneChanged = sceneKey(values) !== shown.scene;
+  Promise.all([sceneChanged ? diorama.prepare(values.scene, values.machines) : null, sceneChanged ? smudges.prepare(values.machines) : true]).then(
+    ([prepared]) => {
+      if (id !== flip.request) return;
+      flip.prepared = prepared;
+      flip.state = "landing";
+    },
+    (err) => {
+      console.error(err);
+      flip.state = "idle";
+    },
+  );
+}
+function swapCard() {
+  const values = flip.values;
+  params.$apply(values);
+  if (flip.prepared) {
+    diorama.show(flip.prepared);
+    smudges.show();
+    u.uSmudge.value = smudges.texture;
+    shown.scene = sceneKey(values);
+  }
+  putCard(values.shape);
+  shown.shape = values.shape;
+  flip.swapped = true;
+}
+// The card spins up while the next one is made, the new one goes on as it passes edge-on, and it winds down to land
+// facing the camera again.
+function updateFlip(dt) {
+  // Changes made in the panel spin to the card they describe.
+  if (flip.state === "idle") {
+    const now = params.$snapshot();
+    if (sceneKey(now) !== shown.scene || now.shape !== shown.shape) requestCard(now);
+    return;
+  }
+  const prev = flip.angle;
+  if (flip.state === "preparing" || (flip.state === "landing" && !flip.swapped)) {
+    flip.omega += (SPIN - flip.omega) * (1 - Math.exp(-2.5 * dt));
+    flip.angle += flip.omega * dt;
+    const edge = (a) => Math.floor((a - Math.PI / 2) / Math.PI);
+    if (flip.state === "landing" && flip.omega > SPIN * 0.5 && edge(flip.angle) !== edge(prev)) {
+      swapCard();
+      // Winds down over the next few turns to rest on a face: an ease-out that starts at the spin's own speed and
+      // slows ever more gently, with no jolt at the end.
+      flip.start = flip.angle;
+      flip.target = Math.ceil((flip.angle + flip.omega * 1.0) / Math.PI) * Math.PI;
+      flip.duration = (3 * (flip.target - flip.angle)) / flip.omega;
+      flip.t = 0;
+    }
+    return;
+  }
+  flip.t = Math.min(1, flip.t + dt / flip.duration);
+  flip.angle = flip.start + (flip.target - flip.start) * (1 - (1 - flip.t) ** 3);
+  // Its speed along the ease, for the blur.
+  flip.omega = ((flip.target - flip.start) * 3 * (1 - flip.t) ** 2) / flip.duration;
+  if (flip.t >= 1) {
+    flip.angle = flip.target;
+    flip.omega = 0;
+    flip.state = "idle";
+    autoChange.restart();
+  }
+}
+
+// Randomizing (R, the button, auto change) prepares the next card and flips to it, rather than changing it at once.
+let started = false;
+onRandomize(() => {
+  if (!started) return gui.randomizeAll();
+  const was = params.$snapshot();
+  gui.randomizeAll();
+  const next = params.$snapshot();
+  params.$apply(was);
+  requestCard(next);
+});
+
+// The pointer carries a torch light; on touch screens it wanders by itself.
+const pointer = new Vector2(0.1, 0.16);
+let mousePointer = false;
+window.addEventListener("pointermove", (e) => {
+  if (e.pointerType !== "mouse") return;
+  mousePointer = true;
+  pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
+});
+const torch = new Vector3(0.12, 0.22, 0.968).normalize();
+const camRight = new Vector3(), camUp = new Vector3(), camFwd = new Vector3();
+const _center = new Vector3(), _n = new Vector3(), _b = new Vector3(), _p = new Vector3();
+const _stage = new Matrix4();
+const _halfTurn = new Matrix4().makeRotationY(Math.PI);
+const smearState = {};
+
+applyUrlState();
+
+const fingerprintImage = load.prints.track(loadFingerprints());
+setLook(params.look(), true);
+const smudges = createSmudges(renderer, await fingerprintImage, { size: mobile ? 512 : 1024 });
+const first = params.$snapshot();
+const prepared = await load.scene.track(Promise.all([diorama.prepare(first.scene, first.machines), smudges.prepare(first.machines)]));
+diorama.show(prepared[0]);
+smudges.show();
+u.uSmudge.value = smudges.texture;
+shown.scene = sceneKey(first);
+putCard(first.shape);
+shown.shape = first.shape;
+const compileScene = new Scene();
+for (const shape of Object.keys(CARD_STYLES)) compileScene.add(new Mesh(geometries[shape], materials[shape]));
+const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
+await load.compile.track(Promise.all([pipeline.compileAsync(compileScene, camera), pipeline.compileAsync(scene, camera), tunnel.prebake(nextFrame), preloadShatterForms(nextFrame)]), 4);
+started = true;
+
+gui.addSeparator();
+gui.addText(keysHelp());
+window.app = {
+  canvas: renderer.domElement,
+  params,
+  pipeline,
+  camera,
+  controls,
+  uniforms: u,
+  diorama,
+  // tools/perf times these as their own segments.
+  perfSegments: (wrap) => {
+    wrap(diorama, "render", "diorama");
+    wrap(tunnel.env, "update", "tunnelEnv");
+  },
+};
+
+let lookShown = params.look();
+tunnel.jump(nativeRandom() * 2000);
+function captureState() {
+  return {
+    url: location.href,
+    time: lastTime,
+    orbitPhase,
+    zoom,
+    flipAngle: flip.angle,
+    roll: rollAngle,
+    spin: spin.q.toArray(),
+    travel: tunnel.uniforms.tunnelTravel.value,
+    tunnelTime: tunnel.uniforms.tunnelTime.value,
+    size: [innerWidth, innerHeight, devicePixelRatio],
+  };
+}
+addKey("KeyC", "copy this moment (for a bug report)", () => {
+  const state = captureState();
+  const url = new URL(location.href);
+  url.searchParams.set("state", btoa(JSON.stringify(state)));
+  console.log(JSON.stringify(state), url.href);
+  navigator.clipboard?.writeText(url.href);
+});
+const stateParam = new URLSearchParams(location.search).get("state");
+if (stateParam) {
+  try {
+    const st = JSON.parse(atob(stateParam));
+    timeShift = st.time;
+    orbitPhase = st.orbitPhase;
+    zoom = st.zoom;
+    flip.angle = st.flipAngle;
+    rollAngle = st.roll;
+    spin.q.fromArray(st.spin);
+    tunnel.jump(st.travel);
+    tunnel.uniforms.tunnelTime.value = st.tunnelTime;
+    // Held still at that moment.
+    setRunning(false);
+  } catch (e) {
+    console.error("bad state", e);
+  }
+}
+render(({ time, dt }) => {
+  time += timeShift;
+  lastTime = time;
+  autoChange.update(dt);
+  updateFlip(dt);
+  if (params.look() !== lookShown) setLook((lookShown = params.look()));
+  easeLook(1 - Math.exp(-6 * dt));
+  tunnel.update(dt, params.speed(), params.bend(), { streaks: params.streaks() ? 1 : 0, dots: params.dots() ? 1 : 0, shutter: params.blur() && !paused ? SHUTTER : 0 });
+
+  // The card dashes down the tunnel: swaying to show its foil and hologram, and spinning for a new one.
+  const sway = params.sway();
+  const turn = flip.angle;
+  // Rolling slowly about its own face, clockwise as the camera sees it, from either side.
+  rollAngle -= dt * params.roll() * Math.sign(Math.cos(turn) || 1);
+  updateSpin(dt);
+  // Turned well off the camera to show the hologram's angles (its colours, smear and depth), one way then the other,
+  // but kept inside its viewing zone and never square on.
+  const yaw = 0.42 * Math.tanh(1.8 * Math.sin(time * 0.31)) + 0.06 * Math.sin(time * 1.1 + 0.5);
+  const pitch = 0.18 * Math.sin(time * 0.23 + 1) + 0.05 * Math.sin(time * 0.9) - 0.04;
+  // Swaying about the middle of the screen (across the view, whichever way the camera looks), banking into it.
+  const sx = (0.62 * Math.sin(time * 0.47) + 0.14 * Math.sin(time * 1.23 + 1.2)) * sway;
+  const sy = (0.32 * Math.sin(time * 0.61 + 0.8) + 0.07 * Math.sin(time * 1.57)) * sway;
+  const vx = (0.62 * 0.47 * Math.cos(time * 0.47) + 0.14 * 1.23 * Math.cos(time * 1.23 + 1.2)) * sway;
+  // The camera circles the card all the way round, always looking at it, rising and dipping on another beat (a
+  // Lissajous path), on an ellipsoid narrow enough to stay inside the tunnel; the scroll wheel scales it. Where it comes
+  // in closer, at the sides, it widens its view to match, so the card keeps (most of) its size on screen.
+  controls.target.set(0, 0, 0);
+  orbitPhase += dt * 0.12 * params.orbit();
+  const az = orbitPhase;
+  const el = 0.45 * Math.sin(orbitPhase * 1.7 + 0.6) + 0.12 * Math.sin(orbitPhase * 3.1);
+  const side = Math.min(zoom, 2.3);
+  camera.position.set(Math.sin(az) * Math.cos(el) * side, Math.sin(el) * side, Math.cos(az) * Math.cos(el) * zoom).add(controls.target);
+  orbitR = camera.position.distanceTo(controls.target);
+  camera.lookAt(controls.target);
+  const fov = MathUtils.radToDeg(2 * Math.atan(Math.tan(MathUtils.degToRad(fovBase) / 2) * (zoom / orbitR) ** 0.8));
+  if (Math.abs(fov - camera.fov) > 1e-4) {
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  }
+  camera.updateMatrixWorld();
+  camera.matrixWorld.extractBasis(camRight, camUp, camFwd);
+  hero.position.copy(controls.target).addScaledVector(camRight, sx).addScaledVector(camUp, sy);
+  _p.copy(camera.position).sub(hero.position);
+  const faceYaw = Math.atan2(_p.x, _p.z), facePitch = -Math.atan2(_p.y, Math.hypot(_p.x, _p.z));
+  const amount = Math.min(sway, 1.25);
+  mesh.rotation.set(facePitch + pitch * amount, turn + faceYaw + yaw * amount, rollAngle + Math.sin(time * 0.29) * 0.05 * amount - vx * 0.25);
+  // The drag's turn, in the camera's frame.
+  camera.getWorldQuaternion(_camQ);
+  mesh.quaternion.premultiply(_dq.copy(_camQ).multiply(spin.q).multiply(_camQ.invert()));
+  hero.updateMatrixWorld();
+  camera.updateMatrixWorld();
+  camera.matrixWorld.extractBasis(camRight, camUp, camFwd);
+
+  if (!mousePointer) pointer.set(Math.sin(time * 0.37) * 0.55, 0.2 + Math.cos(time * 0.23) * 0.35);
+  const torchTarget = camFwd.clone().multiplyScalar(0.92).addScaledVector(camRight, pointer.x * 0.95).addScaledVector(camUp, pointer.y * 0.95 + 0.1).normalize();
+  const lights = u.uLights.value;
+  lights[0].copy(camFwd).multiplyScalar(0.78).addScaledVector(camRight, 0.42).addScaledVector(camUp, 0.45).normalize();
+  lights[1].copy(camFwd).multiplyScalar(-0.78).addScaledVector(camRight, -0.52).addScaledVector(camUp, 0.31).normalize();
+  lights[2].copy(camFwd).multiplyScalar(0.24).addScaledVector(camRight, -0.26).addScaledVector(camUp, 0.93).normalize();
+  lights[3].lerp(torch.copy(torchTarget), 1 - Math.exp(-10 * dt)).normalize();
+  u.uModelRot.value.setFromMatrix4(mesh.matrixWorld);
+  u.uHeroCenter.value.setFromMatrixPosition(hero.matrixWorld);
+  u.uCamRight.value.copy(camRight);
+  u.uCamUp.value.copy(camUp);
+  u.uCamFwd.value.copy(camFwd);
+  u.uTime.value = time;
+  u.uDepthScale.value = params.depth();
+  u.uRingAmount.value = params.rings();
+  u.uBowlDepth.value = params.bowl();
+  u.uRingCount.value = params.ringCount();
+  u.uRingDash.value = params.dash();
+  u.uHaze.value = params.haze();
+  u.uGhost.value = params.ghost();
+  u.uZone.value = MathUtils.degToRad(params.zone());
+  u.uGraze.value = params.graze();
+  u.uCardAspect.value = mesh.geometry.userData.aspect ?? 1;
+  u.uCardCorner.value = mesh.geometry.userData.corner ?? 0.04;
+  u.uFoil.value = params.foil();
+  u.uSmudgeAmount.value = params.fingerprints();
+  u.uCardBorder.value = params.shape() === "glass" ? 0.012 : params.border();
+  u.uWear.value = params.wear();
+  u.uFrameBand.value = 0;
+  u.uHoloGain.value = params.brightness();
+
+  // The frozen scene inside is drawn through the glass before the frame, coming out of the side facing the camera, and
+  // replayed in bands of wavelength about the plate.
+  mesh.updateMatrixWorld();
+  // Its turning since last frame (the spin, a throw, anything), as a rate, for the blur; held while paused.
+  mesh.getWorldQuaternion(_qNow);
+  if (dt > 0) {
+    _qDelta.copy(_qNow).multiply(_qPrev.invert());
+    if (_qDelta.w < 0) _qDelta.set(-_qDelta.x, -_qDelta.y, -_qDelta.z, -_qDelta.w);
+    const angle = 2 * Math.acos(Math.min(1, _qDelta.w));
+    const sin = Math.sqrt(Math.max(0, 1 - _qDelta.w * _qDelta.w));
+    turnRate = angle / dt;
+    if (sin > 1e-6) cardOver.axis.set(_qDelta.x, _qDelta.y, _qDelta.z).divideScalar(sin);
+  }
+  _qPrev.copy(_qNow);
+  cardOver.sweep = params.blur() && !paused ? Math.min(turnRate * SHUTTER, 1.2) : 0;
+  _center.setFromMatrixPosition(mesh.matrixWorld);
+  _n.setFromMatrixColumn(mesh.matrixWorld, 2).normalize();
+  const backSide = _n.dot(_p.copy(camera.position).sub(_center)) < 0;
+  if (backSide) _n.negate();
+  _b.setFromMatrixColumn(mesh.matrixWorld, 1).normalize();
+  _stage.copy(mesh.matrixWorld);
+  // Seen from the card's back, the scene is turned round too, so it always shows the side its lights were on.
+  if (backSide) _stage.multiply(_halfTurn);
+  _stage.elements[12] += _n.x * 0.3;
+  _stage.elements[13] += _n.y * 0.3;
+  _stage.elements[14] += _n.z * 0.3;
+  const view = { matrix: _stage, radius: 0.85, planes: null, id: 0, plate: { p: _center.clone(), n: _n.clone(), up: _b.clone() } };
+  _p.copy(camera.position).sub(view.plate.p).normalize();
+  const replay = braggReplay(view.plate, _p, u.uLights.value, u.uLightPower.value, params.colour(), smearState, dt);
+  view.lambdaB = replay.lambda;
+  view.smear = replay.smear;
+  const dist = _center.distanceTo(camera.position);
+  const bands = mobile ? 6 : 8;
+  const bandT = diorama.render(camera, { views: [view], near: dist - 1.6, span: 3.2, bands, bandwidth: params.bandwidth(), disperse: params.dispersion(), jitter: 0 });
+  u.uBandT.value.fill(0);
+  bandT.forEach((t, k) => (u.uBandT.value[k] = t));
+  u.uBandCount.value = bandT.length;
+  u.uDisperse.value = params.dispersion();
+  u.uBandStep.value.copy(diorama.bandStep);
+  u.uPortalNear.value = dist - 1.6;
+  u.uPortalSpan.value = 3.2;
+  // Screen units per unit of distance across the view, at unit depth.
+  const tanHalf = Math.tan(MathUtils.degToRad(camera.fov) / 2);
+  u.uProj.value.set(1 / (2 * tanHalf * camera.aspect), 1 / (2 * tanHalf));
+  u.uLambda0.value = params.colour();
+  u.uBandwidth.value = params.bandwidth();
+  u.uSwelling.value = params.swelling();
+  // Each card swelled its own way in development.
+  const seed = Number(shown.scene.split("|")[1]) || 1;
+  u.uSwellSeed.value.set((seed * 12.9898) % 97, (seed * 78.233) % 89, (seed * 37.719) % 83);
+
+  pipeline.render(scene, camera, time);
+});

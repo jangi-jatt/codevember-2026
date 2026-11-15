@@ -38,12 +38,15 @@ def breakdown(days, key="passes"):
     if not any(r.get(key) for r in days.values()):
         return
     print(f"GPU ms per pass ({'animating' if key == 'passes' else 'paused'}), median")
-    print(f"{'day':>4} " + " ".join(f"{p:>10}" for p in PASSES) + f" {'sum':>7}")
+    # Segments a day times itself (window.app.perfSegments) get columns after the pipeline's.
+    extra = sorted({k.split(".")[0] for r in days.values() for k in r.get(key, {})} - set(PASSES))
+    cols = PASSES + extra
+    print(f"{'day':>4} " + " ".join(f"{p:>10}" for p in cols) + f" {'sum':>7}")
     for d, r in days.items():
         ps = dict(r.get(key, {}))
         for k in [k for k in ps if "." in k]:
             ps[k.split(".")[0]] = ps.get(k.split(".")[0], 0) + ps.pop(k)
-        print(f"{d:>4} " + " ".join(f"{ps[p]:>10.2f}" if ps.get(p) else f"{'·':>10}" for p in PASSES) + f" {sum(ps.values()):>7.2f}")
+        print(f"{d:>4} " + " ".join(f"{ps[p]:>10.2f}" if ps.get(p) else f"{'·':>10}" for p in cols) + f" {sum(ps.values()):>7.2f}")
     stages = sorted({k for r in days.values() for k in r.get(key, {}) if "." in k})
     if stages:
         print("GPU ms per stage (included in the passes above)")
