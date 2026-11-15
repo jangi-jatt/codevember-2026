@@ -6,7 +6,7 @@ import { Pipeline } from "modules/pipeline/Pipeline.js";
 import { createStudioEnvironment } from "modules/pipeline/studio.js";
 import { globalUniforms } from "modules/pipeline/uniforms.js";
 import { peelPieces, fleshGeometry, sacGeometry, chipGeometry, mulberry32, randomDirection } from "./fruit.js";
-import { createShellMaterial, createFillMaterial, createPlainMaterial, applySubject } from "./materials.js";
+import { createShellMaterial, createChipMaterial, createFillMaterial, createPlainMaterial, applySubject } from "./materials.js";
 import { SUBJECTS } from "./subjects.js";
 import { SHAPES, loadShape, offsetGeometry } from "./shapes.js";
 import { createTransport } from "./transport.js";
@@ -86,6 +86,7 @@ const materials = {
   core: createPlainMaterial({ roughness: 0.35, through: 0 }),
   drop: createPlainMaterial({ roughness: 0.18, specular: 1, through: 1.2 }),
 };
+materials.chip = createChipMaterial(materials.shell);
 
 // ---------------------------------------------------------------- the burst
 
@@ -105,9 +106,11 @@ const dropShape = mergeVertices(new IcosahedronGeometry(1, 2));
 dropShape.computeVertexNormals();
 const drops = new InstancedMesh(dropShape, materials.drop, MAX_DROPS);
 const chipShapes = [3, 4, 5].map((n, i) => chipGeometry(i + 7, n));
-const chipMeshes = chipShapes.map((g) => new InstancedMesh(g, materials.shell, Math.ceil(MAX_CHIPS / chipShapes.length)));
+// Small chips are a few pixels wide and take the shell's lite build; the big ones keep its full detail.
+const chipMeshes = chipShapes.map((g) => new InstancedMesh(g, materials.chip, Math.ceil(MAX_CHIPS / chipShapes.length)));
+const bigChipMeshes = chipShapes.map((g) => new InstancedMesh(g, materials.shell, Math.ceil(MAX_CHIPS / chipShapes.length)));
 const flecks = new InstancedMesh(sacGeometry(), materials.fleck, MAX_FLECKS);
-for (const m of [...chunkMeshes, drops, ...chipMeshes, flecks]) {
+for (const m of [...chunkMeshes, drops, ...chipMeshes, ...bigChipMeshes, flecks]) {
   m.frustumCulled = false;
   scene.add(m);
 }
@@ -230,7 +233,7 @@ function build() {
     // Mostly small, a few large ones that fly fast (and, near the camera, go soft with depth of field).
     const big = rand() < 0.012 * (subject.spray.bigChips ?? 1);
     const size = (big ? 0.12 + 0.12 * rand() : 0.012 + 0.07 * rand() ** 2.2) * (subject.spray.chipSize ?? 1);
-    chips.push({ start, velocity: launch(d, rand, big ? speed * 1.6 + 2 : speed), size, axis: randomDirection(rand), spin: 3 + 14 * rand(), turn: randomDirection(rand) });
+    chips.push({ start, velocity: launch(d, rand, big ? speed * 1.6 + 2 : speed), size, big, axis: randomDirection(rand), spin: 3 + 14 * rand(), turn: randomDirection(rand) });
   }
 }
 
@@ -308,14 +311,16 @@ function place() {
   flecks.instanceMatrix.needsUpdate = true;
   const chipCount = Math.round(MAX_CHIPS * amount * (subject.spray.chips ?? 0));
   chips.forEach((c, i) => {
-    const mesh = chipMeshes[i % chipMeshes.length];
+    const k = i % chipMeshes.length;
+    const mesh = (c.big ? bigChipMeshes : chipMeshes)[k];
     const at = Math.floor(i / chipMeshes.length);
+    (c.big ? chipMeshes : bigChipMeshes)[k].setMatrixAt(at, HIDE);
     if (i >= chipCount || t <= 0) return mesh.setMatrixAt(at, HIDE);
     _p.copy(c.start).addScaledVector(c.velocity, t);
     _q.setFromAxisAngle(c.axis, c.spin * t).multiply(_q2.setFromUnitVectors(_z, c.turn));
     mesh.setMatrixAt(at, _m.compose(_p, _q, _s.set(c.size * (subject.spray.chipStretch ?? 1), c.size, c.size * (subject.spray.chipThin ?? 1))));
   });
-  for (const m of chipMeshes) m.instanceMatrix.needsUpdate = true;
+  for (const m of [...chipMeshes, ...bigChipMeshes]) m.instanceMatrix.needsUpdate = true;
 }
 
 let placedKey = null;
@@ -335,6 +340,8 @@ function update() {
     build();
     placedKey = null;
     applySubject(materials, subject);
+    // Glowing shells keep their texture on the chips: it still reads at a few pixels when every chip is lit.
+    for (const m of chipMeshes) m.material = subject.shell.glow ? materials.shell : materials.chip;
     pipeline.restartAccumulation();
     const set = SETS[subject.set];
     pipeline.background.setRGB(...set.background);

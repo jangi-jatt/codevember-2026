@@ -53,8 +53,9 @@ vec3 fBump(vec3 N, vec3 pos, float h, float scale) {
 // The shell, for big pieces and chips alike: `shell` runs from 1 outside to 0 inside, so torn edges
 // show the outer layer as a rim over the inner one. Patterns: 0 plain, 1 citrus glands, 2 speckle,
 // 3 ripple, 4 plaster over rock, 5 bronze over verdigris, 6 obsidian. `glow` lights the inside from within.
-function createShellMaterial() {
+function createShellMaterial({ lite = false } = {}) {
   return new PipelineMaterial({
+    defines: lite ? { CHIP_LITE: "" } : {},
     roughness: 0.5,
     sheen: 1,
     sheenColor: 0x000000,
@@ -92,6 +93,14 @@ uniform vec3 glowColor;
 uniform float glow;
 uniform vec3 rimColor;
 uniform vec4 film;
+// Kept exact on chips too: what varies from chip to chip rather than across one.
+float fNoiseExact(vec3 p) { return fNoise(p); }
+#ifdef CHIP_LITE
+// Chips a few pixels wide: every noise at its mean and no bump, since their detail is smaller than a pixel.
+#define fNoise(p) 0.5
+#define fWorley(p) vec2(0.45, 0.75)
+#define fBump(N, pos, h, scale) (N)
+#endif
 ` + rockMetalGLSL,
     surface: /* glsl */ `
 void surface(inout Surface s) {
@@ -182,7 +191,7 @@ vec3 thinFilm(float cos1, float n2, float n3, float d) {
 void filmSurface(inout Surface s, float o) {
   vec3 V = normalize(cameraPosition - vWorldPosition);
   float cosV = clamp(dot(s.normal, V), 0.0, 1.0);
-  float wander = fNoise(vHome * 1.2 + 2.0) * 0.7 + fNoise(vHome * 3.1) * 0.3;
+  float wander = fNoiseExact(vHome * 1.2 + 2.0) * 0.7 + fNoiseExact(vHome * 3.1) * 0.3;
   float d = mix(film.z, film.w, wander);
   vec3 r = thinFilm(cosV, film.x, film.y, d);
   // The coated face reflects like a metal of that colour (its reflectance already holds the Fresnel
@@ -374,4 +383,11 @@ function applySubject(materials, subject) {
   if (subject.spray.dropColor !== undefined) materials.drop.uniforms.plainColor.value.set(subject.spray.dropColor);
 }
 
-export { createShellMaterial, createFillMaterial, createPlainMaterial, applySubject };
+// The shell for small chips: its lite build, sharing every uniform with the shell so subjects reach both.
+function createChipMaterial(shell) {
+  const m = createShellMaterial({ lite: true });
+  Object.assign(m.uniforms, shell.uniforms);
+  return m;
+}
+
+export { createShellMaterial, createChipMaterial, createFillMaterial, createPlainMaterial, applySubject };
