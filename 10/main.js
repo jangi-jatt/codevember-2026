@@ -688,6 +688,8 @@ const autoChange = createAutoChange({ enabled: params.auto, every: params.autoTi
 gui.addSection("View");
 gui.addSlider("Spin", params.spin, 0, 0.5, 0.01, { randomizable: false });
 gui.addCheckbox("Studio", params.studio, { randomizable: false });
+// GI accumulates over frames: one slice per frame converges to the same light here, at less cost.
+if (pipeline.quality === "high") pipeline.gi.slices = 1;
 pipeline.addGUI(gui);
 gui.addSeparator();
 

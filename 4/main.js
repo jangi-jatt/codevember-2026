@@ -163,6 +163,8 @@ const autoChange = createAutoChange({ enabled: params.auto, every: params.autoTi
 gui.addSelect("Reflections", params.reflections, ["studio", "hdr"], { randomizable: false });
 gui.addSlider("Depth of field", params.dof, 0, 0.03, 0.001, { randomizable: false });
 gui.addButton("Re-tie", () => retie());
+// GI accumulates over frames: one slice per frame converges to the same light here, at less cost.
+if (pipeline.quality === "high") pipeline.gi.slices = 1;
 pipeline.addGUI(gui);
 gui.addSeparator();
 addKey("KeyT", "re-tie the knot", () => retie());

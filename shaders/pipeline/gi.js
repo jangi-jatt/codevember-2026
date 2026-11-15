@@ -124,6 +124,14 @@ uint popCount(uint v) {
   return (((v + (v >> 4u)) & 0x0F0F0F0Fu) * 0x01010101u) >> 24u;
 }
 
+// acos to ~7e-5 rad (Abramowitz & Stegun 4.4.45), far cheaper than the built-in.
+float fastAcos(float x) {
+  float a = abs(x);
+  float r = (((-0.0187293 * a + 0.0742610) * a - 0.2121144) * a + 1.5707288) * sqrt(1.0 - a);
+  return x < 0.0 ? GI_PI - r : r;
+}
+vec2 fastAcos(vec2 x) { return vec2(fastAcos(x.x), fastAcos(x.y)); }
+
 // Cosine-weighted slice measure (GTAO arc integral) from the view vector to angle x.
 float arc(float x, float n, float cn, float sn) {
   return sign(x) * (cn - cos(2.0 * x - n) + 2.0 * x * sn) * 0.25;
@@ -176,7 +184,7 @@ void main() {
     float projLen = length(projN);
     if (projLen < 1e-4) continue;
 
-    float n = sign(dot(orthoDir, projN)) * acos(clamp(dot(projN, V) / projLen, 0.0, 1.0));
+    float n = sign(dot(orthoDir, projN)) * fastAcos(clamp(dot(projN, V) / projLen, 0.0, 1.0));
     float cn = cos(n);
     float sn = sin(n);
     float lo = arc(n - GI_HALF_PI, n, cn, sn);
@@ -208,7 +216,7 @@ void main() {
 
         vec3 deltaDir = delta / dist;
         vec2 fb = vec2(dot(deltaDir, V), dot(normalize(delta - V * thick), V));
-        fb = sd * acos(clamp(fb, -1.0, 1.0));
+        fb = sd * fastAcos(clamp(fb, -1.0, 1.0));
         fb = clamp(fb, n - GI_HALF_PI, n + GI_HALF_PI);
         vec2 u = vec2(arc(fb.x, n, cn, sn), arc(fb.y, n, cn, sn));
         u = clamp((u - lo) / total, 0.0, 1.0);

@@ -221,6 +221,8 @@ gui.addSelect("Set", params.set, Object.keys(SETS));
 gui.addSelect("Reflections", params.reflections, ["auto", "softbox", "hdr", "studio"], { randomizable: false });
 // Counts once a new shape has loaded.
 const autoChange = createAutoChange({ enabled: params.auto, every: params.autoTime, gui, ready: () => shape?.name === shapeRequest });
+// GI accumulates over frames: one slice per frame converges to the same light here, at less cost.
+if (pipeline.quality === "high") pipeline.gi.slices = 1;
 pipeline.addGUI(gui);
 gui.addSeparator();
 addKey("KeyT", "turn the object over", () => rotation.flip());
