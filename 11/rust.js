@@ -172,11 +172,13 @@ const mat3 ROT = mat3(0.36, 0.48, -0.8, -0.8, 0.6, 0.0, 0.48, 0.64, 0.6);
 // iq's texture-repetition fix (technique 3) on a 3D texture.
 vec4 noTile(highp sampler3D tex, vec3 p) {
   vec3 dx = dFdx(p), dy = dFdy(p);
+  // The level textureGrad picks without anisotropy, once: an explicit level reads 3D textures faster.
+  float lod = log2(max(length(dx), length(dy)) * float(textureSize(tex, 0).x));
   float l = textureLod(noiseTex, p * 0.07 + 0.5, 0.0).x * 8.0;
   float i = floor(l), f = fract(l);
-  vec4 a = textureGrad(tex, p + sin(vec3(3.0, 7.0, 11.0) * i) * 7.3, dx, dy);
+  vec4 a = textureLod(tex, p + sin(vec3(3.0, 7.0, 11.0) * i) * 7.3, lod);
   if (f < 0.2) return a;
-  vec4 b = textureGrad(tex, p + sin(vec3(3.0, 7.0, 11.0) * (i + 1.0)) * 7.3, dx, dy);
+  vec4 b = textureLod(tex, p + sin(vec3(3.0, 7.0, 11.0) * (i + 1.0)) * 7.3, lod);
   return mix(a, b, smoothstep(0.2, 0.8, f - 0.1 * (a.x - b.x + a.y - b.y)));
 }
 
