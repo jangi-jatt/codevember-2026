@@ -35,7 +35,7 @@ composite pass (`infinity.js`), over the lit image: there are no reflection prob
   widened at each bounce by the warped glass and, from a glossy floor on, by the floor's blur. Every tube is
   box-filtered against it, so a lattice twenty reflections deep fades to its mean colour instead of aliasing. A
   ray that still has light left after the last bounce adds the mean light of the rest: the tubes at the rate they
-  cover the walls, over a geometric series of mirror bounces. Pixels whose path went deep get two more rays, at
+  cover the walls, over a geometric series of mirror bounces. Pixels whose path went deep get one more ray, at
   full quality on the sparser solids.
 - **The room's light.** Each window is a uniform polygon light at the inside's mean radiance through the glass. The
   floor and the wall (or the dome) integrate it exactly with the edge integral of the windows facing them (the convex

@@ -553,21 +553,21 @@ void main() {
   float tLimit = depth >= 1.0 ? 1e9 : length(surface - cameraPos);
   // The camera ray, and on a glossy floor its mirror image: one call site for the tracer.
   bool onFloor = floorGloss > 0.0 && depth < 1.0 && abs(surface.y - floorY) < 2e-3 + 2e-3 * tLimit && view.y < 0.0;
-  // Rays: 0 through the pixel's centre; 1-2 more across it where the path went deep (fine lattices); 3 the floor's
+  // Rays: 0 through the pixel's centre; 1 more across it where the path went deep (fine lattices); 2 the floor's
   // mirror image. One call site for the tracer.
   float tFirst = tLimit;
   vec3 sum = vec3(0.0), floorLight = vec3(0.0);
   float count = 0.0;
   bool deep = false;
-  for (int k = 0; k < 4; k++) {
-    if (k >= 1 && k <= 2 && !deep) continue;
-    if (k == 3 && !onFloor) break;
-    bool mirrored = k == 3;
+  for (int k = 0; k < 3; k++) {
+    if (k == 1 && !deep) continue;
+    if (k == 2 && !onFloor) break;
+    bool mirrored = k == 2;
     vec3 rd = view, behind = scene.rgb;
     float tLim = tLimit;
-    if (k >= 1 && k <= 2) {
+    if (k == 1) {
       // An offset ray has its own depth and, where it misses, its own raster colour.
-      vec2 uvk = uv + (k == 1 ? vec2(0.33, 0.25) : vec2(-0.33, -0.25)) * texel;
+      vec2 uvk = uv + vec2(0.33, 0.25) * texel;
       vec4 f2 = inverseViewProjection * vec4(uvk * 2.0 - 1.0, 1.0, 1.0);
       rd = normalize(f2.xyz / f2.w - cameraPos);
       float dk = textureLod(tDepth, uvk, 0.0).r;
@@ -580,8 +580,8 @@ void main() {
       behind = roomGlow;
     }
     float tEntry, used;
-    // The extra rays smooth the lattice's nearer edges; its deep reflections are footprint-filtered already.
-    traceBounces = k == 1 || k == 2 ? min(bounces, max(bounces / 2, deepStart + 2)) : bounces;
+    // The extra ray smooths the lattice's nearer edges; its deep reflections are footprint-filtered already.
+    traceBounces = k == 1 ? min(bounces, max(bounces / 2, deepStart + 2)) : bounces;
     vec4 c = traceSculpture(mirrored ? surface : cameraPos, rd, mirrored ? 1e9 : tLim, mirrored ? tLimit : 0.0, mirrored ? floorRough : 0.0, behind, tEntry, used);
     if (mirrored) {
       // A satin floor: Fresnel from a dielectric, more at grazing angles.

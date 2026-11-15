@@ -651,7 +651,7 @@ function build(planes) {
   infinity.setSculpture(sculpture);
   const u = infinity.material.uniforms;
   u.nodeRadius.value = params.nodes() ? 1.7 * sculpture.tube.radius : 0;
-  // Pixels whose path goes deep get two more rays, at full quality and on the sparser solids.
+  // Pixels whose path goes deep get one more ray, at full quality and on the sparser solids.
   const faces = morph.t < 1 ? Math.max(morph.from.planes.length, morph.to.planes.length) : sculpture.faces.length;
   u.deepStart.value = extraRays() && faces <= DENSE ? 3 : 99;
   writeWindows(sculpture);
