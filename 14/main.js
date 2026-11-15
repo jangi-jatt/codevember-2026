@@ -38,7 +38,12 @@ const FINISHES = {
 
 // 360° equirect panoramas around the scene, fetched when first shown.
 // lift: how far the photo's clipped lights are pushed back up for the lighting (the visible backdrop shows the photo as is).
-const BACKGROUNDS = { Module: { file: "module", lift: 6 }, Bridge: { file: "bridge", lift: 6 }, "Deep space": { file: "space", lift: 3 } };
+// exposure: the photos are dark interiors and space; each is brightened to sit with the other days.
+const BACKGROUNDS = {
+  Module: { file: "module", lift: 6, exposure: 1.35 },
+  Bridge: { file: "bridge", lift: 6, exposure: 1.7 },
+  "Deep space": { file: "space", lift: 3, exposure: 2 },
+};
 function loadPano(name) {
   return new TextureLoader().loadAsync(new URL(`./assets/backgrounds/${BACKGROUNDS[name].file}.jpg`, import.meta.url).href).then((t) => {
     t.colorSpace = SRGBColorSpace;
@@ -53,7 +58,8 @@ function loadPano(name) {
 // comes from its brightest direction. The backdrop maps a direction to the photo as (atan(x, −z), −elevation) and
 // three's equirect lookup as (atan(z, x), +elevation); this mirror takes one onto the other.
 const ENV_ROTATION = new Matrix3().set(0, 0, -1, 0, -1, 0, 1, 0, 0);
-const KEY_LIGHT = 2.5;
+const KEY_LIGHT = 3.2;
+const KEY_DIRECTION = new Vector3(-0.6, 0.8, 0.7).normalize();
 function lightFrom(backdrop, lift) {
   const pmrem = new PMREMGenerator(renderer);
   const target = pmrem.fromEquirectangular(backdrop.lighting(lift));
@@ -120,7 +126,7 @@ const defaults = {
   drift: 1,
   pooling: 0.6,
   background: "Module",
-  blur: 1.6,
+  blur: 0,
   turn: 0.02,
   auto: true,
   autoTime: 15,
@@ -161,7 +167,7 @@ const look = {
 const transitioning = () => !!(look.shape.tween || look.finish.tween || look.background.tween);
 const _cB = new Vector3();
 
-const gui = new GUI(setDay(), document.querySelector("#gui-container"), { expanded: true });
+const gui = new GUI(setDay(), document.querySelector("#gui-container"), { expanded: false });
 gui.addSelect("Shape", params.shape, Object.keys(SHAPES));
 gui.addSelect("Finish", params.finish, Object.keys(FINISHES));
 // Randomizing stays where it reads as water: thinner looks like varnish, thicker like glass.
@@ -180,7 +186,7 @@ ranged(gui.addSlider("Grip", params.grip, 1, 20, 0.1), params.grip, 5, 10);
 ranged(gui.addSlider("Tap strength", params.tapStrength, 0.2, 3, 0.05), params.tapStrength, 0.8, 1.5);
 ranged(gui.addSlider("Random taps", params.taps, 0, 8, 0.1), params.taps, 1.8, 3.5);
 gui.addSelect("Background", params.background, Object.keys(BACKGROUNDS));
-ranged(gui.addSlider("Background blur", params.blur, 0, 5, 0.1), params.blur, 0, 1.6);
+gui.addSlider("Background blur", params.blur, 0, 5, 0.1, { randomizable: false });
 ranged(gui.addSlider("Background turn", params.turn, 0, 0.2, 0.005), params.turn, 0.01, 0.04);
 const autoChange = createAutoChange({ enabled: params.auto, every: params.autoTime, gui, ready: () => !transitioning() });
 pipeline.addGUI(gui);
@@ -244,6 +250,25 @@ function resetParcels() {
   ripples.length = 0;
 }
 
+// The axis along which a shape is thinnest (its smallest principal axis), object space: a torus's own axis.
+function thinAxis(pos) {
+  const n = pos.length / 3;
+  const c = [0, 0, 0], C = [0, 0, 0, 0, 0, 0, 0, 0, 0];
+  for (let i = 0; i < n; i++) for (let k = 0; k < 3; k++) c[k] += pos[i * 3 + k] / n;
+  for (let i = 0; i < n; i++)
+    for (let a = 0; a < 3; a++) for (let b = 0; b < 3; b++) C[a * 3 + b] += (pos[i * 3 + a] - c[a]) * (pos[i * 3 + b] - c[b]) / n;
+  // Power iteration on (trace·I − C): its largest eigenvector is C's smallest.
+  const tr = C[0] + C[4] + C[8];
+  let v = new Vector3(0.3, 0.8, 0.5).normalize();
+  for (let it = 0; it < 60; it++) {
+    const x = (tr - C[0]) * v.x - C[1] * v.y - C[2] * v.z;
+    const y = -C[3] * v.x + (tr - C[4]) * v.y - C[5] * v.z;
+    const z = -C[6] * v.x - C[7] * v.y + (tr - C[8]) * v.z;
+    v.set(x, y, z).normalize();
+  }
+  return v;
+}
+
 // Each shape, once fetched: day 3's mesh and CPU field, our finer field, and its waves.
 const shapes = new Map();
 function prepareShape(name, onProgress) {
@@ -251,7 +276,7 @@ function prepareShape(name, onProgress) {
     const promise = Promise.all([loadShape(name, { lite: true }), shapeSdf(name, onProgress)]).then(async ([next, sdf]) => {
       const w = shapeWaves(name, next, sdf);
       await w.ready;
-      return { name, shape: next, sdf, waves: w };
+      return { name, shape: next, sdf, waves: w, thin: thinAxis(next.walk.attributes.position.array) };
     });
     promise.catch(() => shapes.delete(name));
     shapes.set(name, promise);
@@ -403,7 +428,9 @@ function updateLook(dt) {
   u.envMapB.value = B.env.envMap;
   u.envMix.value = k;
   for (let i = 0; i < 9; i++) g.shIrradiance.value[i].copy(A.env.sh[i]).lerp(B.env.sh[i], k);
-  g.lightDirection.value.copy(A.env.direction).lerp(B.env.direction, k).normalize().applyMatrix3(_turn);
+  // The key stays above left of the camera, so the object is never only backlit; it takes the cabin's colour.
+  g.lightDirection.value.copy(KEY_DIRECTION).applyQuaternion(camera.quaternion);
+  pipeline.exposure = BACKGROUNDS[A.name].exposure + (BACKGROUNDS[B.name].exposure - BACKGROUNDS[A.name].exposure) * k;
   g.lightColor.value.copy(A.env.color).lerp(B.env.color, k);
   const bedA = BED[A.name], bedB = BED[B.name];
   sound.setBed({ hum: bedA.hum + (bedB.hum - bedA.hum) * k, vent: bedA.vent + (bedB.vent - bedA.vent) * k, lowpass: bedA.lowpass * Math.pow(bedB.lowpass / bedA.lowpass, k) });
@@ -418,6 +445,8 @@ const _axis = new Vector3(), _dq = new Quaternion();
 // The body drifts slowly round the centre on a soft spring; a swipe also pushes it. The coat feels the acceleration.
 const SLOSH = { wander: 0.12, stiffness: 1.6, damping: 1.4, push: 0.3, maxPush: 1.4, gain: 0.55 };
 const bodyVel = new Vector3(), linAccel = new Vector3(), _wander = new Vector3(), _f = new Vector3();
+const showcase = { on: false, zoom: false, base: 0, face: {} };
+const _view = new Vector3(), _thin = new Vector3(), _align = new Quaternion();
 function moveBody(time, dt) {
   _wander.set(Math.sin(time * 0.31 + 1.0), Math.sin(time * 0.23 + 2.0) * 0.8, Math.sin(time * 0.27 + 4.0)).multiplyScalar(SLOSH.wander * params.drift());
   _f.copy(_wander).sub(body.position).multiplyScalar(SLOSH.stiffness * SLOSH.stiffness).addScaledVector(bodyVel, -2 * SLOSH.damping);
@@ -425,6 +454,22 @@ function moveBody(time, dt) {
   bodyVel.addScaledVector(_f, dt);
   body.position.addScaledVector(bodyVel, dt);
   _axis.set(Math.sin(time * 0.13), 1, Math.cos(time * 0.17) * 0.6).normalize();
+  if (showcase.on) {
+    // Showcase: the body turns its broad side to the camera and spins about the line of sight, so it reads whole.
+    _view.copy(orbit.target).sub(camera.position).normalize();
+    _axis.copy(_view);
+    const p = look.shape.tween?.to ?? look.shape.shown;
+    if (p) {
+      const face = showcase.face[p.name];
+      _thin.copy(face ? _thin.fromArray(face) : p.thin).transformDirection(body.matrixWorld);
+      // A set facing points at the camera (the view runs from it, so the axis turns to oppose it); a thin axis either way.
+      if (face) _thin.negate();
+      else if (_thin.dot(_view) < 0) _thin.negate();
+      _align.setFromUnitVectors(_thin, _view);
+      _dq.identity().slerp(_align, Math.min(1, dt * 1.2));
+      body.quaternion.premultiply(_dq);
+    }
+  }
   flickOmega.multiplyScalar(Math.exp(-dt / 2.5));
   prevOmega.copy(omega);
   omega.copy(_axis).multiplyScalar(params.spin()).add(flickOmega);
@@ -808,6 +853,12 @@ window.app = {
     sound.shot("whoosh", { gain: 0.4 * strength, rate: 0.95 });
     sound.shot("swirl", { gain: 0.5 * strength });
   },
+  // A quick spin about the line of sight (rad/s at its start), easing off over a few seconds; the coat flings out.
+  spin(speed = 4) {
+    flickOmega.addScaledVector(_eye.copy(orbit.target).sub(camera.position).normalize(), speed);
+    sound.shot("whoosh", { gain: 0.6, rate: 1.1 });
+    sound.shot("swirl", { gain: 0.7 });
+  },
   tapRandom(n = 1) {
     for (let k = 0; k < n; k++) tapSomewhere(params.tapStrength() * (0.9 + 0.4 * nativeRandom()), lastTime, false);
   },
@@ -823,6 +874,14 @@ window.app = {
     camera.up.lerp(_eye.set(0, 1, 0), amount).normalize();
     camera.position.copy(orbit.target).addScaledVector(dir, -dist);
     camera.lookAt(orbit.target);
+  },
+  // For recordings: the body faces the camera with its broad side and spins about the view; zoom follows the drops.
+  // face: { [shape]: [x, y, z] } an object-space direction to turn toward the camera instead of the thin axis.
+  showcase({ zoom = true, face = {} } = {}) {
+    showcase.on = true;
+    showcase.face = face;
+    showcase.zoom = zoom;
+    showcase.base = camera.position.distanceTo(orbit.target);
   },
   tap: (x, y) => {
     const hit = pick(x, y);
@@ -998,5 +1057,16 @@ render(({ time, dt }) => {
   lastSignature = signature;
 
   orbit.update();
+  if (showcase.zoom) {
+    // The camera eases out when drops or tendrils reach far, and back in once they're home.
+    const rest = shape.radius * scale + coat() * 2 + 0.25;
+    let far = rest;
+    for (const b of parcels.list) far = Math.max(far, b.p.distanceTo(centre) + b.r);
+    for (const t of tendrils) far = Math.max(far, t.tip.distanceTo(centre) + GESTURE.tendrilRadius);
+    const want = showcase.base * Math.max(1, far / rest);
+    const dist = camera.position.distanceTo(orbit.target);
+    const next = dist + (want - dist) * (1 - Math.exp(-dt / (want > dist ? 0.35 : 1.2)));
+    camera.position.sub(orbit.target).setLength(next).add(orbit.target);
+  }
   pipeline.render(scene, camera, time);
 });

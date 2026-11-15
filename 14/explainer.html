@@ -1,0 +1,479 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script src="../modules/theme.js"></script><script src="../modules/page.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How Tension Holds</title>
+<meta name="description" content="How Codevember 2026 day 14, Tension, holds water to a floating object in zero gravity: a ray-traced coat over a distance field, waves simulated on the surface, ripples, pooling and sloshing, tendrils that pinch into drops, morphs, and a cabin panorama that is both backdrop and light.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* One reading column on a cabin grey; figures are small water benches. */
+:root {
+  --bg: #e9e7e3;
+  --panel: #f2f0ec;
+  --ink: #1a1918;
+  --muted: #5d5954;
+  --line: #cdc8c1;
+  --accent: #2f7fb5;
+  --accent2: #b5543c;
+  --stage: #e0ddd8;
+  --stage-ink: #8a847d;
+  --skin: #d7cfc4;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Literata", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #121211; --panel: #1b1a19; --ink: #ece9e4; --muted: #a39e97; --line: #34312e;
+    --accent: #7fc0ea; --accent2: #e48a70; --stage: #0c0c0b; --stage-ink: #8a847d; --skin: #4a443e;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #121211; --panel: #1b1a19; --ink: #ece9e4; --muted: #a39e97; --line: #34312e;
+  --accent: #7fc0ea; --accent2: #e48a70; --stage: #0c0c0b; --stage-ink: #8a847d; --skin: #4a443e;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font: 400 17px/1.62 var(--body); margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+main { max-width: 1060px; margin: 0 auto; display: flex; flex-direction: column; gap: 72px; }
+.col { max-width: 680px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.05; }
+h1 { font-weight: 800; font-size: clamp(44px, 9vw, 104px); letter-spacing: -0.035em; }
+h2 { font-weight: 700; font-size: clamp(28px, 4.4vw, 42px); letter-spacing: -0.02em; }
+h3 { font-weight: 700; font-size: 19px; letter-spacing: -0.005em; }
+p { margin: 0; }
+.prose { display: flex; flex-direction: column; gap: 16px; }
+.eyebrow { font: 600 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.eyebrow b { color: var(--accent); font-weight: 600; }
+code, .mono { font-family: var(--mono); font-size: 0.84em; }
+code { background: color-mix(in srgb, var(--ink) 7%, transparent); padding: 0.08em 0.35em; border-radius: 3px; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+section { display: flex; flex-direction: column; gap: 24px; }
+
+/* Hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 40px; align-items: end; padding-top: 48px; }
+.hero .lede { font-size: 20px; line-height: 1.5; max-width: 34ch; }
+.hero-text { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.hero h1 .holo { color: var(--accent); }
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .hero h1 .holo {
+    background: linear-gradient(100deg, var(--accent) 10%, var(--accent2) 95%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+}
+.hero figure { margin: 0; position: relative; }
+.hero img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: 2px; background: var(--stage); }
+.hero figcaption { font: 400 12px/1.4 var(--mono); color: var(--muted); margin-top: 8px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font: 400 13px/1.3 var(--mono); color: var(--muted); }
+.meta span b { color: var(--ink); font-weight: 600; }
+
+/* Figures */
+.fig { background: var(--panel); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.fig-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; align-items: baseline; }
+.fig-cap { font-size: 14.5px; line-height: 1.5; color: var(--muted); max-width: 70ch; }
+.fig canvas { display: block; width: 100%; max-width: 100%; touch-action: pan-y; border-radius: 3px; background: var(--stage); }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; font: 400 13px/1.2 var(--mono); color: var(--muted); }
+.controls label { display: flex; gap: 10px; align-items: center; }
+.controls output { color: var(--ink); min-width: 3ch; font-variant-numeric: tabular-nums; }
+input[type="range"] { accent-color: var(--accent); width: 130px; }
+input[type="checkbox"] { accent-color: var(--accent); }
+select {
+  font: 400 13px/1.2 var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 3px; padding: 6px 8px;
+}
+button {
+  font: 600 13px/1 var(--mono); color: var(--bg); background: var(--ink); border: 0; border-radius: 3px;
+  padding: 9px 14px; cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 400 12.5px/1.2 var(--mono); color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid currentColor; vertical-align: middle; margin-right: 6px; }
+.legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: currentColor; vertical-align: middle; margin-right: 6px; }
+.readout { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 400 13px/1.3 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--ink); font-weight: 600; }
+
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.fact { background: var(--panel); border-radius: 4px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fact b { font: 700 15px/1.2 var(--display); }
+.fact span { font-size: 14px; line-height: 1.45; color: var(--muted); }
+.fact code { font-size: 12.5px; }
+.formula { font: 400 14px/1.6 var(--mono); background: var(--panel); border-radius: 4px; padding: 14px 16px; overflow-x: auto; white-space: nowrap; }
+.formula .c { color: var(--muted); }
+.keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 24px; font-size: 15px; line-height: 1.45; margin: 0; padding: 0; list-style: none; }
+.keys li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.keys b { font: 600 13px/1 var(--mono); }
+footer { font: 400 13px/1.6 var(--mono); color: var(--muted); border-top: 1px solid var(--line); padding-top: 20px; }
+
+@media (max-width: 760px) {
+  .hero { grid-template-columns: minmax(0, 1fr); padding-top: 28px; gap: 28px; }
+  .fig { padding: 16px; }
+  main { gap: 56px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <div class="hero-text">
+      <div class="eyebrow"><a href="../">Codevember 2026</a> · <b>Day 14</b> · Tension</div>
+      <h1>How Tension <span class="holo">holds</span></h1>
+      <p class="lede">In orbit, water doesn't fall. It clings to whatever it touches, holds its shape by surface tension alone, and wobbles, ripples and pinches into drops when disturbed. Here is how the coat is traced, how its waves move, how drops tear off and come home, and how the cabin around it lights the scene.</p>
+      <a class="live" href="./">See it live <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M3 1.8v8.4c0 .5.5.8.9.5l6.6-4.2a.6.6 0 0 0 0-1L3.9 1.3c-.4-.3-.9 0-.9.5z" fill="currentColor"/></svg></a>
+    </div>
+    <figure>
+      <img src="../screenshots/14.jpg" width="1080" height="1080" alt="A brass dodecahedron in a coat of clear water, floating in a spacecraft cabin, with drops pulling free of the water into the air around it." fetchpriority="high" decoding="async">
+      <figcaption>Brass, in a coat of water, drops leaving.</figcaption>
+    </figure>
+  </header>
+
+  <!-- 1. The idea -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The idea</div>
+      <h2>Water with nowhere to fall</h2>
+      <p>Day 14's prompt was Tension. Videos from the International Space Station show water doing what it can't on Earth: a film wrapped round a wet cloth, a ball of water wobbling in mid-air, drops pulled out of it on long necks that snap and drift back. Nothing holds it there but surface tension. The piece puts that on a floating object: a coat of water that clings to it, ripples when tapped, rings as a whole, sloshes when the object is pushed, and stretches into tendrils that tear off into drops.</p>
+      <p>The water is ray traced, not rasterized: every pixel follows its ray in through the surface, refracts, crosses the water, meets the object or leaves again, and sees the cabin around it bent and flipped. The object itself is shaded inside that trace. Everything else (the cabin, its blur, bloom, AgX) is the <a href="../modules/pipeline/explainer.html">shared pipeline</a>.</p>
+    </div>
+  </section>
+
+  <!-- 2. Fields -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The object and its coat · <b>tools/bake.mjs, water.js objectSDF, coat</b></div>
+      <h2>A distance field, grown</h2>
+      <p>The shapes are day 3's: Suzanne, a heart, a blob, a sphube, a torus, a knot, a star, an icosahedron and a dodecahedron, each a signed distance field. Day 3 baked them at 48³, fine for its purposes but blocky seen through a lens, so day 14 bakes its own at 96³. The values are stored as 16-bit integers, second-differenced along x and y and split into byte planes, which gzips each shape to about 0.45 MB. The page undoes the differences on load into a float 3D texture.</p>
+      <p>The water is the same field grown outward: inside wherever the object's distance is less than the coat's thickness at that point. The thickness is never even. A film, plus a smooth pooling field (sums of sine products, so it bends without kinks), plus the simulated wave height below, plus the ripple trains of recent taps. Drops and tendrils are spheres and ellipsoids joined to the coat with a soft minimum, so where they meet they fuse into one surface.</p>
+    </div>
+    <div class="formula">water(p) = smin( object(p) − coat(p), drop₁(p), drop₂(p), … )<br><span class="c">coat = film · (1 + pooling · pool(p)) + waves(p) + ripples(p), floored so troughs never bare the object</span></div>
+  </section>
+
+  <!-- 3. The trace -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Tracing it · <b>water.js trace</b></div>
+      <h2>In, across, and out again</h2>
+      <p>A full-screen pass runs after the pipeline has lit the frame. Each pixel's ray is sphere-traced to the water. At the surface it splits: a Fresnel share reflects the cabin, the rest refracts in with an IOR of about 1.2 (a little under real water's 1.33, which reads better at this scale). Inside, the ray marches at whichever is nearer, the water's surface or the object's. If it reaches the object, the object is shaded there: its print, a GGX highlight from the key, ambient and reflections from the cabin, a soft shadow and AO marched through its own field. If it reaches the surface from inside, it refracts out, or reflects back in when the angle is past total internal reflection, and keeps going.</p>
+      <p>Most of the work is in the edge cases. A ray that grazes the coat would crawl, so surfaces count as hit within half a pixel's footprint and each step has a floor. A crossing only counts if the ray actually goes through the surface; one that grazes the surface it just crossed and would refract the wrong way keeps marching instead. A ray that bounces too long inside a lobe is let out. Silhouette pixels whose ray passes within a pixel of the water are traced from their closest point and blended by how close they came, which antialiases the edge without extra samples.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Rays through a coat, in cross-section</h3>
+        <div class="controls">
+          <label>IOR <input id="rI" type="range" min="1" max="1.6" step="0.01" value="1.2"><output id="rIo">1.20</output></label>
+          <label>Coat <input id="rC" type="range" min="0.04" max="0.4" step="0.01" value="0.18"><output id="rCo">0.18</output></label>
+          <label>Pooling <input id="rP" type="range" min="0" max="1" step="0.01" value="0.5"><output id="rPo">0.50</output></label>
+        </div>
+      </div>
+      <canvas id="rayCanvas" aria-label="A cross-section: a dark rounded square, the object, inside a lighter uneven band of water. Parallel rays come in from the left, bend as they enter the water, and either reach the object (drawn in red, ending in a dot) or pass through the water and bend again as they leave (drawn in blue). Raising the IOR bends them more; thicker water makes the band wider."></canvas>
+      <p class="fig-cap">Rays come from the left. Red ones reach the object, blue ones only pass through water: near the edges the water acts as a lens, which is why the object looks magnified and its outline wavers when the coat moves.</p>
+    </div>
+  </section>
+
+  <!-- 4. Waves -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Waves on the coat · <b>waves.js, splat.worker.js</b></div>
+      <h2>A wave equation on the surface</h2>
+      <p>The coat's height is simulated on the object's own surface mesh, about eight thousand vertices, with the cotangent Laplacian. A pull back to even thickness makes the lowest modes ring, so a tap sets the whole volume wobbling about once a second, the way the ISS's water balls do. Removing the mean height every step conserves the volume. Damping that grows with frequency keeps the waves the mesh can't carry from piling up as noise. Troughs and crests level off softly instead of digging pits or spiking.</p>
+      <p>The tracer needs the height anywhere in space, not at vertices, so it's splatted into a 64³ texture around the object. Which voxels read which vertices is fixed per shape and is built once by a worker. Each frame the CPU only uploads the heights, about 32 KB, and a GPU pass fills the texture's 64 layers from them.</p>
+      <p>The mesh is too coarse for the short, sharp rings a tap makes on real water, so taps draw those directly: a ripple train running out from the contact point, a sharp front with rings trailing behind it, thinning as it spreads. The tap also gives the simulation a smaller kick, for the dent and the wobble. Overlapping trains share a steepness budget so they can't fold the surface into chaos, and a thin coat only carries small ones.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>A ring of water, tapped</h3>
+        <div class="controls">
+          <label>Restore <input id="wK" type="range" min="0" max="60" step="1" value="25"><output id="wKo">25</output></label>
+          <label>Damping <input id="wD" type="range" min="0" max="2" step="0.05" value="0.35"><output id="wDo">0.35</output></label>
+          <button id="wTap" type="button">Tap</button>
+        </div>
+      </div>
+      <canvas id="waveCanvas" aria-label="A circle, the object, with a band of water round it whose outer edge is the simulated height. Tapping pushes a dent into the top; it splits into two waves that run round the ring and meet on the far side, while with Restore above zero the whole ring also slowly squashes and stretches."></canvas>
+      <p class="fig-cap">One dimension of the same equation: the dent splits into two waves that meet on the far side. With Restore at zero they just run round; raised, the ring also swings as a whole, which is the wobble.</p>
+    </div>
+  </section>
+
+  <!-- 5. Slosh -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Sloshing · <b>main.js moveBody, inertialAt</b></div>
+      <h2>Water that lags behind</h2>
+      <p>Spinning a wet object barely changes its coat: the water just shears along. What makes water slosh is being pushed. The object drifts slowly on a soft spring, never quite still, and a swipe pushes it as well as spinning it. The coat feels that acceleration in the object's own frame, as the simulation's forcing: water piles up on the side trailing the push, swings back past even, and settles. Fast spins add their centrifugal and Euler terms the same way, bulging the coat outward.</p>
+    </div>
+  </section>
+
+  <!-- 6. Tendrils -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Drops · <b>main.js tendrils, sim.js</b></div>
+      <h2>A neck that thins, then lets go</h2>
+      <p>Dragging off the edge of the water pulls a tendril: a bulb at the pointer, two spheres along a neck, and a foot in the coat, all soft-minned into it. The bulb follows the pointer on a spring, so it lags and overshoots. As it stretches, the neck thins and the coat under the foot is drawn down. Past about a body's radius it snaps. The bulb flies on as a drop, a small satellite breaks from the neck, and the stump recoils into the coat with a kick to the waves.</p>
+      <p>A drop is a particle with a wobble: a damped spring on its stretch along its acceleration, keeping its volume. Cohesion pulls it home. When it touches the coat it sinks and shrinks over most of a second, and its volume is poured into the coat around the landing point as a swell, which then spreads. The recordings pull three at once.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>The soft minimum, pinching</h3>
+        <div class="controls">
+          <label>Stretch <input id="nS" type="range" min="0" max="1" step="0.005" value="0.45"><output id="nSo">0.45</output></label>
+          <label>Smoothness <input id="nK" type="range" min="0.05" max="0.6" step="0.01" value="0.25"><output id="nKo">0.25</output></label>
+        </div>
+      </div>
+      <canvas id="neckCanvas" aria-label="A flat band of water along the bottom with a round bulb above it, joined by a neck. As Stretch rises the bulb moves up and the neck thins until it breaks and the bulb is a separate drop. Smoothness widens or tightens the neck."></canvas>
+      <p class="fig-cap">The coat, two neck spheres and the bulb, joined by a polynomial soft minimum. Nothing tracks the topology: the neck thins as the spheres part and pinches off by itself.</p>
+    </div>
+  </section>
+
+  <!-- 7. Prints -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Prints · <b>water.js pattern, noise.js</b></div>
+      <h2>Patterns with no seams</h2>
+      <p>Finishes wrap these shapes arbitrarily, so a print projected from outside always seams somewhere. Every print here is defined through space instead, and the surface simply cuts it: stripes are planes, spots are spheres on a jittered lattice, latitude bands are cones round the axis, a candy swirl is planes turning with height, giraffe patches are Voronoi cells, coral is a gyroid, wood is rings round a buried log, agate onion shells, Damascus folded layers, marble warped veins. Each edge is filtered over the pixel's footprint.</p>
+      <p>Their noise comes from a small baked 3D texture rather than a noise function in the shader. That isn't about speed. On Windows, Chrome translates the shader for Direct3D, whose compiler inlines every call and slows down sharply on long shaders. Inlined noise pushed the compile toward ten seconds; the texture brought it to under two.</p>
+    </div>
+  </section>
+
+  <!-- 8. Changes -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Changes · <b>main.js updateLook</b></div>
+      <h2>Morph, sweep, crossfade</h2>
+      <p>Nothing cuts. A new shape morphs: the two distance fields blend over two seconds while the coat swells, the waves fade out and restart on the new mesh, and the size and centre ease across. A new finish sweeps over the object behind a wavering front, each point showing one finish or the other, so the print is still compiled only once. A new background crossfades with its whole lighting. When a change lands, the water is tapped twice to set it moving. Thickness and smoothness ease to new values.</p>
+    </div>
+  </section>
+
+  <!-- 9. Cabin -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The cabin · <b>backdrop.js, main.js lightFrom</b></div>
+      <h2>A photo that is also the light</h2>
+      <p>Behind the object is a 360° panorama: an ISS module, a starship bridge, or deep space. It's defocused with a real Gaussian blur on the GPU, widened toward the poles by 1/cos(latitude) so it covers the same angle everywhere and the poles don't pinch. The same photo is the light. A lightly blurred copy, its clipped highlights pushed back up into HDR, goes through the pipeline's environment path for reflections and ambient. The key light points at its brightest region and takes its average colour. The whole cabin turns slowly about a wandering axis, like a camera adrift, and the reflections turn with it.</p>
+    </div>
+  </section>
+
+  <!-- 10. Sound -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Sound · <b>sound.js</b></div>
+      <h2>Hum, drip, slosh</h2>
+      <p>Under everything is the cabin: a spacecraft hum and ventilation, brighter in the module, warmer on the bridge, nearly empty in deep space. Each tap plays a drop and the swell of its spreading ripple. Stirring sloshes in time with the pointer. A stretching tendril squishes, snaps with a bloop and lands with a plop. A push whooshes and swirls, and a morph bubbles. Everything is cut from CC0 recordings on freesound.org, credited in the README, and panned to where it happens.</p>
+    </div>
+  </section>
+
+  <!-- 11. Controls -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Using it</div>
+      <h2>Controls</h2>
+    </div>
+    <ul class="keys col">
+      <li><b>Tap</b> the water for ripples, <b>hold</b> for a dent, <b>drag</b> over it to stir.</li>
+      <li><b>Drag off its edge</b> to pull a drop; <b>swipe</b> to push and spin the object.</li>
+      <li>Drag the background to orbit, freely, over the poles; scroll or pinch to zoom.</li>
+      <li><b>Shape</b>, <b>Finish</b>, <b>Background</b> and their blur and turn; water thickness, pooling, smoothness, IOR.</li>
+      <li><b>Spin</b>, <b>Drift</b>, <b>Tap strength</b> and how often it taps itself.</li>
+      <li><b>R</b> for a new look, <b>M</b> or the speaker button for sound; it changes by itself every 15 s.</li>
+      <li><b>Space</b> pauses, <b>F</b> goes fullscreen, <b>Tab</b> hides the panel, <b>P</b> saves a screenshot.</li>
+    </ul>
+  </section>
+  <footer class="col">
+    <div class="meta">
+      <span><b>three.js</b> r187</span><span>WebGL2</span><span>ray traced water</span><span>CC0 sound</span><span>no build step</span>
+    </div>
+    Day 14 of <a href="../">Codevember 2026</a> by Jaume Sanchez Elias. See it live at <a href="https://spite.github.io/codevember-2026/14/">spite.github.io/codevember-2026/14</a>; the source is in <a href="https://github.com/spite/codevember-2026/tree/main/14">14/ of the codevember-2026 repository</a>. The cabin and the object's light come through the <a href="../modules/pipeline/explainer.html">photographic pipeline</a>.
+  </footer>
+</main>
+
+<script>
+(() => {
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const $ = (id) => document.getElementById(id);
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const font = (px, w = 400) => `${w} ${px}px ${css("--mono") || "monospace"}`;
+
+  function setup(canvas, aspect, draw) {
+    const ctx = canvas.getContext("2d");
+    let lastW = -1, W = 0, H = 0;
+    const fit = (force) => {
+      if (force !== true && canvas.clientWidth === lastW) return;
+      lastW = canvas.clientWidth;
+      W = canvas.clientWidth || 600; H = Math.round(W * aspect);
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); canvas.style.height = H + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      draw(ctx, W, H);
+    };
+    new ResizeObserver(() => requestAnimationFrame(fit)).observe(canvas);
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => fit(true));
+    new MutationObserver(() => fit(true)).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return { redraw: () => fit(true), size: () => [W, H], ctx };
+  }
+  function animate(canvas, step) {
+    let on = false, last = 0;
+    new IntersectionObserver(([e]) => { on = e.isIntersecting; if (on) { last = performance.now(); requestAnimationFrame(loop); } }).observe(canvas);
+    function loop(now) {
+      if (!on) return;
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      step(dt);
+      requestAnimationFrame(loop);
+    }
+  }
+  const bind = (id, out, fmt, fn) => { const el = $(id); const o = $(out); const upd = () => { if (o) o.textContent = fmt(+el.value); fn(); }; el.addEventListener("input", upd); upd(); return el; };
+  const water = () => getComputedStyle(document.documentElement).getPropertyValue("--accent").trim();
+
+  /* ---------- Rays through a coat ---------- */
+  {
+    const canvas = $("rayCanvas");
+    // The object: a rounded square; its distance, and the water's (object grown by an uneven coat).
+    const R = 0.42, round = 0.12;
+    const objD = (x, y) => { const qx = Math.abs(x) - R + round, qy = Math.abs(y) - R + round; return Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - round; };
+    const coat = (x, y, c, p) => c * Math.max(0.15, 1 + p * 0.9 * Math.sin(3.1 * Math.atan2(y, x) + 0.7) * Math.cos(1.7 * Math.atan2(y, x)));
+    const watD = (x, y, c, p) => objD(x, y) - coat(x, y, c, p);
+    const grad = (f, x, y) => { const e = 1e-3; const gx = f(x + e, y) - f(x - e, y), gy = f(x, y + e) - f(x, y - e); const l = Math.hypot(gx, gy) || 1; return [gx / l, gy / l]; };
+    const refract = (dx, dy, nx, ny, eta) => { const c = -(dx * nx + dy * ny); const k = 1 - eta * eta * (1 - c * c); if (k < 0) return null; const t = eta * c - Math.sqrt(k); return [eta * dx + t * nx, eta * dy + t * ny]; };
+    const view = setup(canvas, 0.55, draw);
+    function draw(ctx, W, H) {
+      const ior = +$("rI").value, c = +$("rC").value, p = +$("rP").value;
+      const S = H * 0.62, cx = W * 0.5, cy = H * 0.5;
+      const toS = (x, y) => [cx + x * S, cy - y * S];
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      // Water and object, filled from their fields.
+      const img = ctx.createImageData(Math.ceil(W), Math.ceil(H));
+      const wc = water(), oc = css("--ink");
+      const hexrgb = (h) => { const n = parseInt(h.replace("#", ""), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+      const wr = hexrgb(wc.startsWith("#") ? wc : "#2f7fb5"), or = hexrgb(oc.startsWith("#") ? oc : "#1a1918"), st = hexrgb(css("--stage").startsWith("#") ? css("--stage") : "#e0ddd8");
+      for (let py = 0; py < img.height; py += 1)
+        for (let px = 0; px < img.width; px += 1) {
+          const x = (px - cx) / S, y = (cy - py) / S, i = (py * img.width + px) * 4;
+          let col = st;
+          if (objD(x, y) < 0) col = or.map((v) => Math.round(v * 0.85 + 40 * 0.15));
+          else if (watD(x, y, c, p) < 0) col = st.map((v, k) => Math.round(v * 0.72 + wr[k] * 0.28));
+          img.data[i] = col[0]; img.data[i + 1] = col[1]; img.data[i + 2] = col[2]; img.data[i + 3] = 255;
+        }
+      ctx.putImageData(img, 0, 0);
+      // Rays from the left.
+      ctx.lineWidth = 1.3;
+      const n = 23;
+      for (let k = 0; k < n; k++) {
+        let x = -W / 2 / S, y = -0.9 * (H / 2 / S) + (k / (n - 1)) * 1.8 * (H / 2 / S), dx = 1, dy = 0;
+        let inside = false, hit = false;
+        const path = [[x, y]];
+        for (let s = 0; s < 900; s++) {
+          const w = watD(x, y, c, p), o = objD(x, y);
+          if (inside && o < 0.002) { hit = true; path.push([x, y]); break; }
+          if (!inside && w < 0.002) {
+            const [nx, ny] = grad((a, b) => watD(a, b, c, p), x, y);
+            const r = refract(dx, dy, nx, ny, 1 / ior); if (!r) break;
+            [dx, dy] = r; inside = true; path.push([x, y]); x += dx * 0.006; y += dy * 0.006; continue;
+          }
+          if (inside && -w < 0.002) {
+            const [nx, ny] = grad((a, b) => watD(a, b, c, p), x, y);
+            const r = refract(dx, dy, -nx, -ny, ior);
+            if (!r) { const d = dx * nx + dy * ny; dx -= 2 * d * nx; dy -= 2 * d * ny; }
+            else { [dx, dy] = r; inside = false; }
+            path.push([x, y]); x += dx * 0.006; y += dy * 0.006; continue;
+          }
+          const step = Math.max(inside ? Math.min(-w, o) : w, 0.002);
+          x += dx * step; y += dy * step;
+          if (Math.abs(x) > W / S || Math.abs(y) > H / S) { path.push([x, y]); break; }
+        }
+        ctx.strokeStyle = hit ? css("--accent2") : water();
+        ctx.beginPath();
+        path.forEach(([a, b], i) => { const [sx, sy] = toS(a, b); i ? ctx.lineTo(sx, sy) : ctx.moveTo(sx, sy); });
+        ctx.stroke();
+        if (hit) { const [sx, sy] = toS(...path[path.length - 1]); ctx.fillStyle = css("--accent2"); ctx.beginPath(); ctx.arc(sx, sy, 2.4, 0, 7); ctx.fill(); }
+      }
+    }
+    bind("rI", "rIo", (v) => v.toFixed(2), () => view.redraw());
+    bind("rC", "rCo", (v) => v.toFixed(2), () => view.redraw());
+    bind("rP", "rPo", (v) => v.toFixed(2), () => view.redraw());
+  }
+
+  /* ---------- Waves on a ring ---------- */
+  {
+    const canvas = $("waveCanvas");
+    const N = 160;
+    const h = new Float32Array(N), v = new Float32Array(N);
+    const tap = () => { const at = Math.floor(N * 0.25); for (let i = 0; i < N; i++) { let d = Math.abs(i - at); d = Math.min(d, N - d); v[i] -= 1.6 * Math.exp(-(d * d) / 18); } };
+    $("wTap").addEventListener("click", tap);
+    let k = 25, damp = 0.35;
+    bind("wK", "wKo", (x) => x.toFixed(0), () => (k = +$("wK").value));
+    bind("wD", "wDo", (x) => x.toFixed(2), () => (damp = +$("wD").value));
+    const view = setup(canvas, 0.5, draw);
+    let auto = 1.2;
+    animate(canvas, (dt) => {
+      auto -= dt; if (auto < 0) { tap(); auto = 5; }
+      const c = 9, sub = 8, h_ = dt / sub;
+      for (let s = 0; s < sub; s++) {
+        let mean = 0;
+        for (let i = 0; i < N; i++) {
+          const lap = h[(i + 1) % N] + h[(i - 1 + N) % N] - 2 * h[i];
+          v[i] += (c * c * lap * (N / 40) * (N / 40) * 0.02 - k * h[i] * 0.4 - damp * v[i]) * h_;
+          mean += v[i];
+        }
+        mean /= N;
+        for (let i = 0; i < N; i++) { v[i] -= mean; h[i] += v[i] * h_; }
+      }
+      // The ring's lowest mode as the swing: an ellipse that squashes and stretches.
+      view.redraw();
+    });
+    function draw(ctx, W, H) {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const cx = W / 2, cy = H / 2, r = H * 0.27, film = H * 0.08;
+      ctx.beginPath();
+      for (let i = 0; i <= N; i++) {
+        const a = (i / N) * Math.PI * 2 - Math.PI / 2, rr = r + film + h[i % N] * film * 0.9;
+        const x = cx + Math.cos(a) * rr, y = cy + Math.sin(a) * rr;
+        i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      }
+      ctx.closePath();
+      ctx.fillStyle = water(); ctx.globalAlpha = 0.35; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.strokeStyle = water(); ctx.lineWidth = 2; ctx.stroke();
+      ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.fillStyle = css("--ink"); ctx.globalAlpha = 0.8; ctx.fill(); ctx.globalAlpha = 1;
+      ctx.fillStyle = css("--muted"); ctx.font = font(12);
+      ctx.fillText("tap here", cx - 26, cy - r - film - 14);
+    }
+  }
+
+  /* ---------- The soft minimum, pinching ---------- */
+  {
+    const canvas = $("neckCanvas");
+    const smin = (a, b, k) => { const h = Math.max(k - Math.abs(a - b), 0) / k; return Math.min(a, b) - h * h * k * 0.25; };
+    const view = setup(canvas, 0.55, draw);
+    function draw(ctx, W, H) {
+      const s = +$("nS").value, k = +$("nK").value;
+      const S = H, x0 = W / 2;
+      const r0 = 0.11, film = 0.12, base = 0.18;
+      const tipY = base + film + 0.05 + s * 0.55;
+      const neck = r0 * Math.max(0.12, 0.75 - 0.6 * s);
+      const balls = [[0, base + film, r0 * 0.85], [0, base + film + (tipY - base - film) * 0.35, Math.max(neck * 1.3, r0 * 0.2)], [0, base + film + (tipY - base - film) * 0.68, neck], [0, tipY, r0 * (0.75 + 0.3 * s)]];
+      const f = (x, y) => { let d = y - (base + film); for (const [bx, by, br] of balls) d = smin(d, Math.hypot(x - bx, y - by) - br, k * 0.4); return d; };
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const img = ctx.createImageData(Math.ceil(W), Math.ceil(H));
+      const hexrgb = (h) => { const n = parseInt(h.replace("#", ""), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+      const wc = water(), st = css("--stage"), ink = css("--ink");
+      const wr = hexrgb(wc.startsWith("#") ? wc : "#2f7fb5"), sr = hexrgb(st.startsWith("#") ? st : "#e0ddd8"), ir = hexrgb(ink.startsWith("#") ? ink : "#1a1918");
+      for (let py = 0; py < img.height; py++)
+        for (let px = 0; px < img.width; px++) {
+          const x = (px - x0) / S, y = (H - py) / S, i = (py * img.width + px) * 4;
+          let col = sr;
+          if (y < base) col = ir.map((v) => Math.round(v * 0.85 + 30));
+          else { const d = f(x, y); const a = clamp(0.5 - d * S, 0, 1); col = sr.map((v, j) => Math.round(v + (Math.round(v * 0.6 + wr[j] * 0.4) - v) * a)); }
+          img.data[i] = col[0]; img.data[i + 1] = col[1]; img.data[i + 2] = col[2]; img.data[i + 3] = 255;
+        }
+      ctx.putImageData(img, 0, 0);
+    }
+    bind("nS", "nSo", (v) => v.toFixed(2), () => view.redraw());
+    bind("nK", "nKo", (v) => v.toFixed(2), () => view.redraw());
+  }
+})();
+</script>
+</body>
+</html>
