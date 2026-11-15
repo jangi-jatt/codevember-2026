@@ -513,6 +513,7 @@ uniform highp sampler2D tCurve;
 uniform highp sampler2D tPosition;
 uniform highp sampler2D tNormal;
 uniform highp sampler2D tReflection;
+uniform highp sampler2D tReflectionInfo;
 uniform vec4 chunks[${MAX_TUBES * CHUNKS}];
 uniform int tubeCount;
 uniform float blend;
@@ -863,8 +864,31 @@ vec4 reflectionBands(vec3 p, vec3 n, vec3 r, float cone) {
 
 // The reflection with the bands from the accumulated reflection pass, over this pixel's own env.
 vec3 accumulated(vec3 r) {
+#ifdef HALF_REFLECTIONS
+  // Half-res reflections: bilinear over the texels of this same surface (matching view depth).
+  ivec2 size = textureSize(tReflection, 0);
+  vec2 f = gl_FragCoord.xy * 0.5 - 0.5;
+  ivec2 b0 = ivec2(floor(f));
+  vec2 fr = f - floor(f);
+  float z = 1.0 / gl_FragCoord.w;
+  vec4 b = vec4(0.0);
+  float ws = 0.0;
+  for (int i = 0; i < 4; i++) {
+    ivec2 o = ivec2(i & 1, i >> 1);
+    ivec2 q = clamp(b0 + o, ivec2(0), size - 1);
+    float zq = texelFetch(tReflectionInfo, q, 0).x;
+    if (zq <= 0.0 || abs(zq - z) > 0.02 * z + 0.01) continue;
+    vec4 c = texelFetch(tReflection, q, 0);
+    if (!finite4(c)) continue;
+    float w = (o.x == 1 ? fr.x : 1.0 - fr.x) * (o.y == 1 ? fr.y : 1.0 - fr.y) + 1e-3;
+    b += c * w;
+    ws += w;
+  }
+  b = ws > 0.0 ? b / ws : vec4(0.0);
+#else
   vec4 b = texelFetch(tReflection, ivec2(gl_FragCoord.xy), 0);
   if (!finite4(b)) b = vec4(0.0);
+#endif
   return envAt(r) * (1.0 - b.a) + b.rgb;
 }
 
@@ -1100,7 +1124,16 @@ void main() {
   vec3 n = normalize(vWorldNormal);
   vec3 v = normalize(cameraPosition - vWorldPosition);
   vec3 nm = n;
+#ifdef HALF_REFLECTIONS
+  // In front at any of the four full-res pixels this one covers; the depth buffer keeps the nearest.
+  ivec2 fp = ivec2(gl_FragCoord.xy) * 2;
+  ivec2 lim = textureSize(tSceneDepth, 0) - 1;
+  float dmax = max(max(texelFetch(tSceneDepth, min(fp, lim), 0).r, texelFetch(tSceneDepth, min(fp + ivec2(1, 0), lim), 0).r),
+    max(texelFetch(tSceneDepth, min(fp + ivec2(0, 1), lim), 0).r, texelFetch(tSceneDepth, min(fp + ivec2(1, 1), lim), 0).r));
+  bool front = gl_FragCoord.z <= dmax + 2e-5;
+#else
   bool front = gl_FragCoord.z <= texelFetch(tSceneDepth, ivec2(gl_FragCoord.xy), 0).r + 2e-5;
+#endif
   if (front) n = exactNormal(vWorldPosition, n, vBand, vRing);
   // As in the colour pass, so the env under the bands matches it.
   coneLod = min(log2(length(fwidth(reflect(-v, fwidth(front ? 1.0 : 0.0) > 0.0 ? nm : n))) + 1e-6) + envMapMaxLod - 1.65, 3.0);
@@ -1203,7 +1236,9 @@ void main() {
 `;
 
 export class Tangle {
-  constructor(knots, { rings = 256, sides = 36, iterations = 3, volume = 64, reflectionSteps = 24 } = {}) {
+  constructor(knots, { rings = 256, sides = 36, iterations = 3, volume = 64, reflectionSteps = 24, halfReflections = false } = {}) {
+    // Opt-in: the reflection pass at half resolution, upsampled per surface in the colour pass.
+    this.halfReflections = halfReflections;
     this.knots = knots;
     this.vol = volume;
     this.volTiles = Math.ceil(Math.sqrt(volume));
@@ -1270,9 +1305,14 @@ export class Tangle {
     const target = (type) =>
       new WebGLRenderTarget(1, 1, { count: 2, type, format: RGBAFormat, minFilter: NearestFilter, magFilter: NearestFilter, depthBuffer: false, colorSpace: NoColorSpace });
     this.bandsTarget = target(FloatType);
+    if (this.halfReflections) {
+      this.bandsTarget.depthBuffer = true;
+      this.bandsTarget.depthTexture = null;
+    }
     this.historyTargets = [target(HalfFloatType), target(HalfFloatType)];
     this.history = 0;
     this.meshUniforms.tReflection.value = this.historyTargets[0].textures[0];
+    this.meshUniforms.tReflectionInfo.value = this.historyTargets[0].textures[1];
     this.previousViewProjection = new Matrix4();
     this.viewProjection = new Matrix4();
     this.updates = 0;
@@ -1299,9 +1339,9 @@ export class Tangle {
       vertexShader: REFLECT_VERT,
       fragmentShader: REFLECT_FRAG,
       uniforms: this.reflectUniforms,
-      defines: { VOL: this.vol, VOL_TILES: this.volTiles, REFLECTION_STEPS: this.reflectionSteps, EXACT_PASSES: 3, SECTION_STEPS: 6, FINISH: -1, RINGS: this.rings, SIDES: this.sides, LOCAL: 1, ...SECTION_DEFINES },
-      depthTest: false,
-      depthWrite: false,
+      defines: { VOL: this.vol, VOL_TILES: this.volTiles, REFLECTION_STEPS: this.reflectionSteps, EXACT_PASSES: 3, SECTION_STEPS: 6, FINISH: -1, RINGS: this.rings, SIDES: this.sides, LOCAL: 1, ...SECTION_DEFINES, ...this.halfDefines() },
+      depthTest: this.halfReflections,
+      depthWrite: this.halfReflections,
     });
     this.resolveMaterial = new RawShaderMaterial({
       glslVersion: GLSL3,
@@ -1327,10 +1367,16 @@ export class Tangle {
     };
   }
 
+  halfDefines() {
+    return this.halfReflections ? { HALF_REFLECTIONS: "" } : {};
+  }
+
   _renderReflections(renderer, camera) {
     const main = renderer.getRenderTarget();
     if (!main) return;
-    const { width, height } = main;
+    const half = this.halfReflections;
+    const width = half ? Math.ceil(main.width / 2) : main.width;
+    const height = half ? Math.ceil(main.height / 2) : main.height;
     let reset = false;
     if (this.bandsTarget.width !== width || this.bandsTarget.height !== height) {
       for (const rt of [this.bandsTarget, ...this.historyTargets]) rt.setSize(width, height);
@@ -1349,7 +1395,7 @@ export class Tangle {
     const clearAlpha = renderer.getClearAlpha();
     renderer.setClearColor(0x000000, 0);
     renderer.setRenderTarget(this.bandsTarget);
-    renderer.clear(true, false, false);
+    renderer.clear(true, this.halfReflections, false);
     renderer.render(this.reflectScene, camera);
 
     const source = this.historyTargets[this.history];
@@ -1368,6 +1414,7 @@ export class Tangle {
     renderer.setRenderTarget(dest);
     renderer.render(this.quadScene, this.quadCamera);
     this.meshUniforms.tReflection.value = dest.textures[0];
+    this.meshUniforms.tReflectionInfo.value = dest.textures[1];
     this.previousViewProjection.copy(this.viewProjection);
 
     renderer.setRenderTarget(main);
@@ -1466,10 +1513,11 @@ export class Tangle {
       backdropMap: { value: null },
       finishWeights: { value: new Vector3(1, 0, 0) },
       tReflection: { value: null },
+      tReflectionInfo: { value: null },
     };
     this.finish ??= finish;
     const material = new PipelineMaterial({
-      defines: { VOL: this.vol, VOL_TILES: this.volTiles, REFLECTION_STEPS: this.reflectionSteps, EXACT_PASSES: 3, SECTION_STEPS: 6, FINISH: finish, RINGS: this.rings, SIDES: this.sides, LOCAL: 1, ...SECTION_DEFINES },
+      defines: { VOL: this.vol, VOL_TILES: this.volTiles, REFLECTION_STEPS: this.reflectionSteps, EXACT_PASSES: 3, SECTION_STEPS: 6, FINISH: finish, RINGS: this.rings, SIDES: this.sides, LOCAL: 1, ...SECTION_DEFINES, ...this.halfDefines() },
       color: 0x000000,
       metalness: finish === 1 || finish === 3 ? 0 : 1,
       roughness: 0.06,
