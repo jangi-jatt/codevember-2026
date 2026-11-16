@@ -322,7 +322,11 @@ function updateBeat(dt) {
   u.tunnelWaveS.value = beat.waveAt + (u.tunnelTravel.value - beat.waveAt) * 4;
   u.tunnelWaveAmp.value = beat.wave;
 }
-showHint("Drag to spin the card · scroll to zoom · R for a new card", "Drag to spin the card · tap {randomize} for a new card");
+// Fullscreen is for watching: the UI hides on entering it and comes back on leaving.
+for (const e of ["fullscreenchange", "webkitfullscreenchange"]) {
+  document.addEventListener(e, () => document.body.classList.toggle("hide-ui", !!(document.fullscreenElement || document.webkitFullscreenElement)));
+}
+showHint("Drag to spin the card · Space to pause · F to enjoy", "Drag to spin the card · tap {randomize} for a new card");
 gui.show();
 
 const scene = new Scene();

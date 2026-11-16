@@ -11,8 +11,8 @@ Rubik's cube mid-turn, Saturn, and a pyramid with its capstone floating above it
 
 The holographic shader is spite's own (a standalone three.js study, brought into the pipeline here).
 
-Controls: drag to spin the card, scroll to zoom, R for a new card, M for sound, C to copy a link to the exact moment (it
-replays paused). The panel sets the card, scene and seed, the hologram's colour, bandwidth, swelling, viewing zone and
+Controls: drag to spin the card, scroll to zoom, Space to pause, F for fullscreen (which hides the UI), R for a new card, M
+for sound, C to copy a link to the exact moment (it replays paused). The panel sets the card, scene and seed, the hologram's colour, bandwidth, swelling, viewing zone and
 dispersion, the background rings (and the solid tracks under them), the glass and how much of the tunnel it reflects,
 and the motion. Auto change flips to a new card every 8 bars of the music (without it, every 10 seconds), a trading card
 or a glass plate at even odds, never three of one in a row.
