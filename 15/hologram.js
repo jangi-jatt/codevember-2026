@@ -164,6 +164,8 @@ const fragmentPars = /* glsl */ `
   uniform float uBowlDepth;
   uniform float uRingCount;
   uniform float uRingDash;
+  // A faint solid track under each ring's dashes (0: none).
+  uniform float uRingTrack;
   uniform float uBraggWidth;
   uniform float uFrameBand;
   uniform float uPlateReflection;
@@ -393,8 +395,11 @@ const fragmentPars = /* glsl */ `
     float dpx = max(fwidth(th / TAU * dashes), 1e-4) + 0.3 * holoGrazeNow;
     float band = 1.0 - smoothstep(0.45 * 0.5 - px, 0.45 * 0.5 + px, abs(ringF - 0.5));
     float dash = 1.0 - smoothstep(uRingDash * 0.5 - dpx, uRingDash * 0.5 + dpx, abs(dashF - 0.5));
+    // Each ring's track its own strength (from its index and the card's seed): none, faint or strong, for contrast.
+    float th2 = hash21(vec2(ringI * 1.37 + 3.1, uSwellSeed.x));
+    float track = uRingTrack * (th2 < 0.35 ? 0.0 : th2 < 0.75 ? 0.6 : 2.0);
     // Rings finer than a pixel fade to their average.
-    float on = mix(band * dash, 0.45 * uRingDash, smoothstep(0.25, 0.6, px)) * smoothstep(0.12, 0.3, rr);
+    float on = mix(band * mix(track, 1.0, dash), 0.45 * mix(track, 1.0, uRingDash), smoothstep(0.25, 0.6, px)) * smoothstep(0.12, 0.3, rr);
     if (on < 0.002) return vec3(0.0);
 
     // Shaded by the bowl's slope: its walls face in toward the scene.
@@ -1179,6 +1184,7 @@ export function createHologramUniforms({ portal, replays, look = "spectrum" } = 
     uBowlDepth: { value: 1 },
     uRingCount: { value: 9 },
     uRingDash: { value: 0.6 },
+    uRingTrack: { value: 0 },
     uBraggWidth: { value: 0.3 },
     uFrameBand: { value: 0 },
     uPlateReflection: { value: initial.plateReflection },

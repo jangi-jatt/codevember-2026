@@ -40,6 +40,7 @@ const defaults = {
   bowl: 1,
   ringCount: 9,
   dash: 0.6,
+  ringTrack: 0,
   haze: 0.03,
   ghost: 0.25,
   graze: 0.8,
@@ -110,6 +111,8 @@ gui.addSlider("Rings", params.rings, 0, 2, 0.01);
 gui.addSlider("Bowl depth", params.bowl, 0.3, 2, 0.01);
 gui.addSlider("Ring count", params.ringCount, 4, 20, 1);
 gui.addSlider("Dashes", params.dash, 0.2, 1, 0.01);
+// Half the cards have none; the rest a faint solid ring under the dashes.
+gui.addSlider("Ring track", params.ringTrack, 0, 1, 0.01).randomize = () => params.ringTrack.set(Math.random() < 0.5 ? 0 : Math.round((0.15 + Math.random() * 0.25) * 100) / 100);
 randomIn(gui.addSlider("Haze", params.haze, 0, 1, 0.01), params.haze, 0, 0.1, 0.01);
 gui.addSection("Glass");
 gui.addSlider("Wear", params.wear, 0, 1.5, 0.01);
@@ -455,11 +458,18 @@ function easeLook(k) {
 // spins, and the new one goes on as it passes edge-on.
 const shown = { shape: "", scene: "" };
 const sceneKey = (v) => v.scene + "|" + v.machines;
-const flip = { state: "idle", angle: 0, omega: 0, values: null, prepared: null, swapped: false, target: 0, start: 0, duration: 1, t: 0, request: 0 };
+const flip = { wind: 0, windFrom: 0, state: "idle", angle: 0, omega: 0, values: null, prepared: null, swapped: false, target: 0, start: 0, duration: 1, t: 0, request: 0 };
 // Spin rate while the next card is made (rad/s), and how it winds down after.
 const SPIN = 16;
+// The wind-up before it: turned back by WIND_BACK (rad) and forward again over WIND (s), leaving it already turning.
+const WIND = 0.45, WIND_BACK = 0.35;
 function requestCard(values) {
   const id = ++flip.request;
+  // From rest, it winds up first; already turning, it carries on.
+  if (flip.state === "idle") {
+    flip.wind = 0;
+    flip.windFrom = flip.angle;
+  } else flip.wind = WIND;
   flip.state = "preparing";
   flip.values = values;
   flip.swapped = false;
@@ -487,6 +497,7 @@ function swapCard() {
     shown.scene = sceneKey(values);
   }
   putCard(values.shape);
+  shapeRun = values.shape === shown.shape ? shapeRun + 1 : 1;
   shown.shape = values.shape;
   flip.swapped = true;
   autoChange.restart();
@@ -503,6 +514,15 @@ function updateFlip(dt) {
   }
   const prev = flip.angle;
   if (flip.state === "preparing" || flip.state === "ready" || (flip.state === "landing" && !flip.swapped)) {
+    if (flip.wind < WIND) {
+      flip.wind = Math.min(WIND, flip.wind + dt);
+      const x = flip.wind / WIND;
+      // -k x^2 (1 - x): from rest, back to WIND_BACK at two thirds, then forward through the start already turning.
+      const k = (27 / 4) * WIND_BACK;
+      flip.angle = flip.windFrom - k * x * x * (1 - x);
+      flip.omega = (-k * (2 * x - 3 * x * x)) / WIND;
+      return;
+    }
     flip.omega += (SPIN - flip.omega) * (1 - Math.exp(-2.5 * dt));
     flip.angle += flip.omega * dt;
     const edge = (a) => Math.floor((a - Math.PI / 2) / Math.PI);
@@ -530,6 +550,9 @@ function updateFlip(dt) {
   }
 }
 
+// How many cards in a row have had the shape on show.
+let shapeRun = 1;
+
 // Randomizing (R, the button, auto change) prepares the next card and flips to it, rather than changing it at once.
 let started = false;
 // Randomizes the panel, then narrows the bandwidth as the dispersion rises (the bands spread further apart), from
@@ -541,6 +564,11 @@ function randomizeLook() {
   if (started && params.scene() === scene) {
     const others = SCENES.filter((name) => name !== scene);
     params.scene.set(others[Math.floor(Math.random() * others.length)]);
+  }
+  // Trading card or glass plate, even odds, but never three of one in a row.
+  if (started) {
+    const other = shown.shape === "card" ? "glass" : "card";
+    params.shape.set(shapeRun >= 2 || Math.random() < 0.5 ? other : shown.shape);
   }
   const k = MathUtils.clamp((params.dispersion() - 1.5) / 1.5, 0, 1);
   const lo = MathUtils.lerp(20, 3, k), hi = MathUtils.lerp(40, 15, k);
@@ -729,6 +757,7 @@ render(({ time, dt }) => {
   u.uBowlDepth.value = params.bowl();
   u.uRingCount.value = params.ringCount();
   u.uRingDash.value = params.dash();
+  u.uRingTrack.value = params.ringTrack();
   u.uHaze.value = params.haze();
   u.uGhost.value = params.ghost();
   u.uZone.value = MathUtils.degToRad(params.zone());

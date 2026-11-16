@@ -453,23 +453,47 @@ vec2 tSlopeT(float s) {
 vec2 tOffset(float d) {
   return (tCurveT(tunnelTravel + d) - tCurveT(tunnelTravel) - tSlopeT(tunnelTravel) * d) * tunnelBend;
 }
+// How far outside the bent tube's wall the ray is, t along it (negative inside).
+float tOutside(vec3 P, vec3 R, float t) {
+  vec3 X = P + R * t;
+  return length(X.xy - tOffset(-X.z)) - RADIUS_T;
+}
 vec3 traceTunnel(vec3 P, vec3 R, float rough) {
-  vec2 off = vec2(0.0);
-  float t = 1e3;
+  // The straight tube's hit to start from, then bracketed and bisected against the bent one (the bend grows with
+  // distance, so far down the tube the straight hit can be well off).
   float A = dot(R.xy, R.xy);
-  for (int i = 0; i < 3; i++) {
-    vec2 o = P.xy - off;
-    float B = dot(o, R.xy), C = dot(o, o) - RADIUS_T * RADIUS_T;
-    t = A > 1e-6 ? (-B + sqrt(max(B * B - A * C, 0.0))) / A : 1e3;
-    off = tOffset(-(P.z + R.z * t));
+  float B = dot(P.xy, R.xy), C = dot(P.xy, P.xy) - RADIUS_T * RADIUS_T;
+  float hi = A > 1e-6 ? (-B + sqrt(max(B * B - A * C, 0.0))) / A : 400.0;
+  hi = min(hi, 400.0);
+  float lo = 0.0;
+  for (int i = 0; i < 4; i++) {
+    if (tOutside(P, R, hi) > 0.0) break;
+    lo = hi;
+    hi *= 2.0;
   }
+  for (int i = 0; i < 7; i++) {
+    float m = 0.5 * (lo + hi);
+    if (tOutside(P, R, m) > 0.0) hi = m;
+    else lo = m;
+  }
+  // Exact against the circle the bend puts there (it changes slowly along the tube).
+  vec2 off = tOffset(-(P.z + R.z * hi));
+  vec2 o = P.xy - off;
+  B = dot(o, R.xy);
+  C = dot(o, o) - RADIUS_T * RADIUS_T;
+  float t = A > 1e-6 ? (-B + sqrt(max(B * B - A * C, 0.0))) / A : hi;
   vec3 H = P + R * t;
   vec2 q = H.xy - off;
-  // A pixel's footprint there, stretched along the tube where the ray meets the wall at a glance.
-  float w = t * tunnelPixelAngle;
+  // A pixel's footprint there (from the camera, by way of the glass), stretched along the tube where the ray meets the
+  // wall at a glance; and blurred more the further it reaches, fading the far wall to its average as the tunnel's own
+  // distance does.
+  // Never less than the hit's own change from pixel to pixel, which catches how far down the tube the wall foreshortens.
+  float w = (length(P - cameraPosition) + t) * tunnelPixelAngle;
   float across = abs(dot(R.xy, normalize(q)));
-  float blur = t * rough * rough * 1.5;
-  return tunnelBlendAt(atan(q.y, q.x), tunnelTravel - H.z, -H.z, blur, w / RADIUS_T, w / max(across, 0.05), tunnelBlurLen) * tunnelLight;
+  float a = atan(q.y, q.x), s = tunnelTravel - H.z;
+  float da = max(w / RADIUS_T, tAngleWidth(a)), ds = max(w / max(across, 0.05), fwidth(s));
+  float blur = t * rough * rough * 1.5 + max(t - 12.0, 0.0) * 0.03;
+  return tunnelBlendAt(a, s, -H.z, blur, da, ds, tunnelBlurLen) * tunnelLight;
 }
 `;
 
