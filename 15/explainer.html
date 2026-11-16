@@ -1,0 +1,910 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script src="../modules/theme.js"></script><script src="../modules/page.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How Mirage Shimmers</title>
+<meta name="description" content="How Codevember 2026 day 15, Mirage, replays a frozen 3D scene as a white-light hologram on a trading card: Bragg colour, bands of wavelength sheared about the plate, lighting baked once, diffraction foil, a tunnel bent in its vertex shader with motion blur in closed form, traced reflections, and a beat map that keeps it in time.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* One reading column on a cool grey; figures are small benches on a dark stage, where light adds up. */
+:root {
+  --bg: #e8e6ec;
+  --panel: #f1eff4;
+  --ink: #19171d;
+  --muted: #5b5764;
+  --line: #ccc7d4;
+  --accent: #6b3fd0;
+  --accent2: #c8327e;
+  --stage: #121018;
+  --stage-ink: #8d87a0;
+  --skin: #d4cde0;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Literata", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111016; --panel: #1a1820; --ink: #ebe8f1; --muted: #a29db0; --line: #322e3c;
+    --accent: #b49bff; --accent2: #ff7ab8; --stage: #0a0910; --stage-ink: #8d87a0; --skin: #4a4458;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111016; --panel: #1a1820; --ink: #ebe8f1; --muted: #a29db0; --line: #322e3c;
+  --accent: #b49bff; --accent2: #ff7ab8; --stage: #0a0910; --stage-ink: #8d87a0; --skin: #4a4458;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font: 400 17px/1.62 var(--body); margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+main { max-width: 1060px; margin: 0 auto; display: flex; flex-direction: column; gap: 72px; }
+.col { max-width: 680px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.05; }
+h1 { font-weight: 800; font-size: clamp(44px, 9vw, 104px); letter-spacing: -0.035em; }
+h2 { font-weight: 700; font-size: clamp(28px, 4.4vw, 42px); letter-spacing: -0.02em; }
+h3 { font-weight: 700; font-size: 19px; letter-spacing: -0.005em; }
+p { margin: 0; }
+.prose { display: flex; flex-direction: column; gap: 16px; }
+.eyebrow { font: 600 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.eyebrow b { color: var(--accent); font-weight: 600; }
+code, .mono { font-family: var(--mono); font-size: 0.84em; }
+code { background: color-mix(in srgb, var(--ink) 7%, transparent); padding: 0.08em 0.35em; border-radius: 3px; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+section { display: flex; flex-direction: column; gap: 24px; }
+
+/* Hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 40px; align-items: end; padding-top: 48px; }
+.hero .lede { font-size: 20px; line-height: 1.5; max-width: 34ch; }
+.hero-text { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.hero h1 .holo { color: var(--accent); }
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .hero h1 .holo {
+    background: linear-gradient(100deg, var(--accent) 10%, var(--accent2) 95%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+}
+.hero figure { margin: 0; position: relative; }
+.hero img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: 2px; background: var(--stage); }
+.hero figcaption { font: 400 12px/1.4 var(--mono); color: var(--muted); margin-top: 8px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font: 400 13px/1.3 var(--mono); color: var(--muted); }
+.meta span b { color: var(--ink); font-weight: 600; }
+
+/* Figures */
+.fig { background: var(--panel); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.fig-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; align-items: baseline; }
+.fig-cap { font-size: 14.5px; line-height: 1.5; color: var(--muted); max-width: 70ch; }
+.fig canvas { display: block; width: 100%; max-width: 100%; touch-action: pan-y; border-radius: 3px; background: var(--stage); }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; font: 400 13px/1.2 var(--mono); color: var(--muted); }
+.controls label { display: flex; gap: 10px; align-items: center; }
+.controls output { color: var(--ink); min-width: 3ch; font-variant-numeric: tabular-nums; }
+input[type="range"] { accent-color: var(--accent); width: 130px; }
+input[type="checkbox"] { accent-color: var(--accent); }
+select {
+  font: 400 13px/1.2 var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line);
+  border-radius: 3px; padding: 6px 8px;
+}
+button {
+  font: 600 13px/1 var(--mono); color: var(--bg); background: var(--ink); border: 0; border-radius: 3px;
+  padding: 9px 14px; cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 400 12.5px/1.2 var(--mono); color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid currentColor; vertical-align: middle; margin-right: 6px; }
+.legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: currentColor; vertical-align: middle; margin-right: 6px; }
+.readout { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 400 13px/1.3 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--ink); font-weight: 600; }
+
+.items { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.item { background: var(--panel); border-radius: 4px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.item img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--stage); }
+.item > div { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 10px; }
+.item h3 { font-size: 20px; }
+.item p { font-size: 15px; line-height: 1.55; color: var(--muted); }
+.styles { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; }
+.styles .item > div { padding-top: 18px; }
+.styles .item img { aspect-ratio: 3 / 2; }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.fact { background: var(--panel); border-radius: 4px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fact b { font: 700 15px/1.2 var(--display); }
+.fact span { font-size: 14px; line-height: 1.45; color: var(--muted); }
+.fact code { font-size: 12.5px; }
+.formula { font: 400 14px/1.6 var(--mono); background: var(--panel); border-radius: 4px; padding: 14px 16px; overflow-x: auto; white-space: nowrap; }
+.formula .c { color: var(--muted); }
+.keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 24px; font-size: 15px; line-height: 1.45; margin: 0; padding: 0; list-style: none; }
+.keys li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.keys b { font: 600 13px/1 var(--mono); }
+footer { font: 400 13px/1.6 var(--mono); color: var(--muted); border-top: 1px solid var(--line); padding-top: 20px; }
+
+@media (max-width: 760px) {
+  .hero { grid-template-columns: minmax(0, 1fr); padding-top: 28px; gap: 28px; }
+  .fig { padding: 16px; }
+  main { gap: 56px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <div class="hero-text">
+      <div class="eyebrow"><a href="../">Codevember 2026</a> · <b>Day 15</b> · Mirage</div>
+      <h1>How Mirage <span class="holo">shimmers</span></h1>
+      <p class="lede">A holographic trading card rushes down a neon tunnel to the music. Inside it, a frozen 3D scene floats in rainbow light that shifts as the card turns. Here is how a real hologram replays its image, how that is faked in a few passes a frame, and how the tunnel, its blur and its reflections keep time with the song.</p>
+      <a class="live" href="./">See it live <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M3 1.8v8.4c0 .5.5.8.9.5l6.6-4.2a.6.6 0 0 0 0-1L3.9 1.3c-.4-.3-.9 0-.9.5z" fill="currentColor"/></svg></a>
+    </div>
+    <figure>
+      <img src="../screenshots/15.jpg" width="1080" height="1080" alt="A holographic trading card with rainbow foil, a spray of golden gears glowing inside it, rushing down a neon tunnel of blurred coloured tiles." fetchpriority="high" decoding="async">
+      <figcaption>A trading card of gears, at full speed.</figcaption>
+    </figure>
+  </header>
+
+  <!-- 1. The idea -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The idea</div>
+      <h2>A souvenir from the eighties</h2>
+      <p>Day 15's prompt was Mirage: something that looks solid and isn't there. The most familiar one is the hologram on a trading card or a sticker, a little 3D object floating behind a sheet of foil, its colours sliding through the rainbow as you tilt it. The piece puts one on a card, a trading card with foil and printed markings or a bare glass plate, and sends it down a synthwave tunnel that pulses to a song.</p>
+      <p>The scene inside the card is a real 3D scene, frozen: a spray of gears (day 11's), one of day 2's bursts caught halfway, or one of nine smaller scenes, from Suzanne's head and a Rubik's cube mid-turn to Saturn and a pyramid with its capstone floating. It is drawn the way a white-light reflection hologram replays its recording, which is where the colour comes from. The card, the tunnel and the light go through the <a href="../modules/pipeline/explainer.html">shared pipeline</a>.</p>
+    </div>
+  </section>
+
+  <!-- 2. Bragg -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Replay · <b>diorama.js braggReplay, hologram.js</b></div>
+      <h2>Light that picks its own colour</h2>
+      <p>A reflection hologram stores its image as layers of fringes inside the gelatin, like the pages of a very thin book, tilted halfway between the plate's normal and the reference beam it was recorded with. Lit with white light, each layer reflects a little of every colour, and only one wavelength comes back in step from all of them: the one whose half-wavelength, inside the gelatin, matches the layers' spacing along the light's path. That is Bragg reflection. Tilt the light (or the card) and the path through the layers changes, and with it the colour.</p>
+      <p>The card does this per pixel with the actual lights of the scene: for each, the angle between it and the fringes (refracted into gelatin of index 1.52) gives a wavelength, weighted by how near its mirror direction is to the eye. The gelatin also swelled unevenly when it was developed, so the colour drifts toward orange-red in patches and toward the edges, as on real plates.</p>
+    </div>
+    <div class="formula">λ = λ₀ · cos θ<sub>in</sub> / cos θ<sub>rec</sub><br><span class="c">θ: the light's angle to the fringes inside the gelatin (Snell, n = 1.52), against the reference beam's when it was recorded; λ₀: the colour it shows at the reference angle</span></div>
+    <div class="fig">
+      <div class="fig-head"><h3>A plate, a lamp and an eye</h3>
+        <div class="controls">
+          <label>Lamp angle <input id="bA" type="range" min="-30" max="80" step="1" value="45"><output id="bAo">45°</output></label>
+          <label>λ₀ <input id="bL" type="range" min="500" max="640" step="1" value="575"><output id="bLo">575 nm</output></label>
+        </div>
+      </div>
+      <canvas id="braggCanvas" aria-label="A vertical plate with slanted fringe lines inside it. A lamp on the right shines on it from an adjustable angle; a beam comes back toward an eye in the colour the fringes select, shown on a spectrum strip below."></canvas>
+      <div class="readout"><span>replays at <b id="bOut">575 nm</b></span><span>brightness <b id="bBright">1.00</b></span></div>
+      <p class="fig-cap">The fringes lie halfway between the plate's normal and a reference beam from the front and above. At the reference angle the plate shows λ₀. Lit more steeply, it shifts toward blue; and the further the lamp is from mirroring into the eye, the dimmer the image.</p>
+    </div>
+  </section>
+
+  <!-- 3. Bands -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Bands of wavelength · <b>diorama.js render, hologram.js bandColour</b></div>
+      <h2>A rainbow made of copies</h2>
+      <p>The plate doesn't reflect one exact wavelength but a band around it, and each wavelength rebuilds the image a little apart from the others: the image is sharp at the plate itself, and the further a point lies in front of it or behind it, the more its colours fan out. That smear is the signature of a white-light hologram, and it is why the scene inside stays shallow.</p>
+      <p>So the scene is drawn once into a record buffer, and then once per band of wavelength, eight times a frame (six on phones), each copy sheared about the plate in proportion to how far its wavelength is from the plate's Bragg colour. Each band is a single depth-tested draw into its own colour channel, four bands to a buffer, so each keeps only its nearest surfaces. The card's shader then reads the bands back, colours each by its wavelength round this pixel's centre, and averages them across one band's spacing so the copies join into one smear.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Three points at three depths</h3>
+        <div class="controls">
+          <label>Dispersion <input id="sD" type="range" min="0" max="3" step="0.01" value="2"><output id="sDo">2.00</output></label>
+          <label>Bandwidth <input id="sW" type="range" min="3" max="60" step="1" value="30"><output id="sWo">30 nm</output></label>
+          <label>Bands <input id="sN" type="range" min="1" max="12" step="1" value="8"><output id="sNo">8</output></label>
+        </div>
+      </div>
+      <canvas id="bandCanvas" aria-label="Three glowing dots, labelled in front, on the plate and behind. Each is drawn once per band of wavelength, in that band's colour, shifted in proportion to its depth: the middle one stays white and sharp, the outer two spread into short rainbows pointing opposite ways."></canvas>
+      <p class="fig-cap">Copies add as light does. With a single band there is no colour at all; with a few the copies show as separate dots; with eight, averaged across their spacing, they read as one continuous rainbow. Points in front and behind fan in opposite directions.</p>
+    </div>
+  </section>
+
+  <!-- Scenes -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The scenes · <b>clockwork.js, shatter.js, scenes.js</b></div>
+      <h2>Eleven frozen scenes</h2>
+      <p>Every scene is generated from the card's seed, so the same card always holds the same scene, and each is built to read well at the hologram's size: a few large, distinct forms rather than fine detail, which the bands' rainbow smear would blur away anyway. A hologram records only brightness (its colour comes from the replay), so the parts are all grey and differ by how they shine: each mesh carries three numbers, its metalness, roughness and brightness (the code's <code>SHINY</code> metal, <code>SATIN</code> and <code>GLOSS</code> lacquers, or its own). Scenes are built in pieces between frames, then merged into one mesh and lit once (next section).</p>
+    </div>
+    <div class="items">
+      <article class="item"><img src="explainer/scene-gears.jpg" alt="A spray of metal gears of many kinds, frozen as they fly apart, inside the glass plate." loading="lazy"><div>
+        <h3>Gears</h3>
+        <p>A spray of 26 gears from day 11's procedural gear library, each a different kind: involute spur gears with solid, webbed, spoked or holed bodies, a coarse one with few big teeth, a worn one, helical and herringbone gears, bevel gears with and without chamfers, an internal ring gear, a worm and its worm wheel. Each takes a tooth count (8 to 22, the three biggest 18 to 34), a module and a face width.</p>
+        <p>They are placed by rejection: a random direction and distance in a ball (the three biggest near the middle), refused if their bounding spheres would overlap, first by a quick estimate and then by the exact bounds of the built gear. Each gear's axis is turned partly toward the way out, so the spray reads as flung from the centre, with a random turn about it. One gear is built a frame.</p>
+      </div></article>
+      <article class="item"><img src="explainer/scene-shatter.jpg" alt="A white shell burst into curved fragments flying out to one side, with splinters, inside the glass plate." loading="lazy"><div>
+        <h3>Burst</h3>
+        <p>One of day 2's bursts, a shell sphere or a bronze torus, caught early in its flight. The surface is split into 48 to 70 cells: their centres spread evenly by repeatedly taking the farthest of a set of random candidates, then each point of the surface belongs to its nearest centre, measured after a 3D noise warp so the cracks wander, and with distance shortened along the way out from the impact so the cells near it run long.</p>
+        <p>Each cell becomes a piece with real thickness, inner and outer skins and rims, thrown out by how much it faces the burst side, with a random spin. Splinters (three-, four- and five-sided chips) come off the burst side, the smallest left out here. The shell keeps a solid core. Day 2's shapes are built at 60% of their tessellation for this, about 155 thousand vertices.</p>
+      </div></article>
+      <article class="item"><img src="explainer/scene-head.jpg" alt="Suzanne, Blender's monkey head, turned slightly, inside the glass plate." loading="lazy"><div>
+        <h3>Head</h3>
+        <p>Blender's Suzanne, parsed from its OBJ by the shared Suzanne module and Loop-subdivided twice into a smooth head, centred on its bounding box and given a satin finish. The mesh comes pitched nose-down, so she is tilted back 21° to face out of the card. Only her turn changes from seed to seed (up to 23° either way), so the subdivided mesh is built once while the page loads and each card takes a copy: subdividing it took 44 ms, a visible hitch, when it was done on a change.</p>
+      </div></article>
+      <article class="item"><img src="explainer/scene-crystals.jpg" alt="A spiky star polyhedron surrounded by smaller faceted solids at different depths, inside the glass plate." loading="lazy"><div>
+        <h3>Crystals</h3>
+        <p>A Kepler–Poinsot star polyhedron (small or great stellated dodecahedron, great dodecahedron or great icosahedron, from the shared polyhedra module) in the middle, and up to nine smaller Platonic and Archimedean solids round it, each at a random direction and depth, refused if it would touch one already placed.</p>
+        <p>Star polyhedra have faces that cross themselves, which a simple triangle fan from a corner gets wrong. So every face is fanned from its centroid, with one normal per face from the sum of its edges' cross products, giving crisp flat facets that catch the key light one at a time.</p>
+      </div></article>
+      <article class="item"><img src="explainer/scene-gear.jpg" alt="One large spoked gear with several smaller gears meshing round its rim, some carrying a second wheel on a shaft, seen at an angle." loading="lazy"><div>
+        <h3>Gear train</h3>
+        <p>One big involute spur gear (40 to 51 teeth, with spokes, holes or a web) on its shaft, and three to five pinions of 10 to 19 teeth spread round its rim. Day 11's <code>meshSpur</code> places each pinion: at the sum of the two pitch radii, and turned by the phase that puts its teeth into the big gear's gaps, so they really mesh.</p>
+        <p>Each pinion is a compound gear, carrying a second, finer wheel out along its shaft in front or behind, so the train has depth when seen in three-quarter view, the way it is posed.</p>
+      </div></article>
+      <article class="item"><img src="explainer/scene-chess.jpg" alt="A small chessboard seen from above and in front, with a king, a queen and three other pieces standing on it." loading="lazy"><div>
+        <h3>Chess</h3>
+        <p>A four-by-four board of alternating dark and glossy squares, and five pieces in random squares, always a king and a queen. Each piece is a lathe: a profile of ten or so points, base to crown, spun round its axis in 40 segments, so a pawn, rook, bishop, queen and king are each just a short list of numbers. The king's cross is two boxes. The board is tipped toward the viewer and turned a little.</p>
+      </div></article>
+      <article class="item"><img src="explainer/scene-knot.jpg" alt="A thick glossy trefoil knot, its three loops spread across the plate." loading="lazy"><div>
+        <h3>Knot</h3>
+        <p>A torus knot: a tube following a curve that winds p times round a torus's axis while circling it q times. It is mostly the trefoil (2, 3), sometimes the cinquefoil (2, 5); denser knots turned into a tangle once the bands smeared them. Its axis stays within 25° of the viewer, so the loops spread across the plate instead of stacking end-on.</p>
+      </div></article>
+      <article class="item"><img src="explainer/scene-atom.jpg" alt="A cluster of small balls in the middle with three or four thin elliptical orbits round it, each with a ball on it." loading="lazy"><div>
+        <h3>Atom</h3>
+        <p>The 1950s atom, still everywhere in the eighties: a nucleus of nine to fourteen balls, alternately metal and satin, packed into a small sphere (their distances drawn as the cube root of a random number, so they fill it evenly), and three or four orbits round it. Each orbit is a thin torus squashed into an ellipse, tipped steeply and turned a fraction of a half turn from the last, with an electron at a random point on it.</p>
+      </div></article>
+      <article class="item"><img src="explainer/scene-cube.jpg" alt="A Rubik's cube seen corner-on, its stickers in shades of grey, one layer twisted part of the way round." loading="lazy"><div>
+        <h3>Rubik's cube</h3>
+        <p>26 rounded cubies on a three-by-three-by-three grid, the hidden centre left out, with a rounded sticker on every outward face. Sticker colours become six greys, all the hologram can keep, scrambled: each sticker is its face's grey just over half the time. The cubies of one random outer layer are parented to a group that is twisted part way, 20° to 40°, as if caught mid-turn, and the cube is seen corner-on with three faces showing, set further back in the window so its corners stay in.</p>
+      </div></article>
+      <article class="item"><img src="explainer/scene-saturn.jpg" alt="Saturn, a banded planet with a wide tilted ring system and a small moon." loading="lazy"><div>
+        <h3>Saturn</h3>
+        <p>The planet is seven slices of a sphere, one per latitude band, in alternating lighter and darker tones, so the bands are real geometry rather than a texture. The rings are four flat annuli at increasing radii, each its own brightness, with a dark gap left between the second and third, after the Cassini division. One to three small moons sit beyond the rings, and the whole system is tipped toward the viewer and turned, so the rings are seen as an open ellipse.</p>
+      </div></article>
+      <article class="item"><img src="explainer/scene-pyramid.jpg" alt="A pyramid with its top floating separately above it, a small orb and a halo in the gap between." loading="lazy"><div>
+        <h3>Pyramid</h3>
+        <p>A truncated pyramid, smooth (a four-sided frustum, its vertices split so every face is flat) or stepped (six boxes shrinking toward the top), chosen by the seed. Its capstone floats above it, with a small orb and a thin halo ring in the gap: the mystic emblem of eighties stickers and posters. It sits a little further back in the window, and is seen from slightly above.</p>
+      </div></article>
+    </div>
+  </section>
+
+  <!-- 4. Recording -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Recording once · <b>diorama.js mergeScene, bakeLighting</b></div>
+      <h2>Lit from 248 directions, once</h2>
+      <p>A hologram records its subject once, so the scene never moves, and its lighting doesn't need to either. When a new card is made, the scene is merged into one mesh, and its diffuse light is baked per vertex on the GPU: the scene's depth is rendered from each of 248 directions (64 across the softbox key, 24 for a rim light, 160 over the whole sky), and every vertex, drawn as a single point at its own texel, tests itself against each depth map and adds its share. The key also gets a proper shadow map, kept for the frame, for soft contact shadows that sharpen near what casts them; the reflections stay live.</p>
+      <p>Shadows lift to a third of the key rather than black: in a hologram, a black part reads as a hole cut in the plate.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Sky light, one direction at a time</h3>
+        <div class="controls">
+          <label>Directions <input id="kN" type="range" min="1" max="160" step="1" value="12"><output id="kNo">12</output></label>
+        </div>
+      </div>
+      <canvas id="bakeCanvas" aria-label="A cross-section of a few round shapes on a floor. Their outlines are dotted, each dot shaded by how much of the sky it sees; with more directions the shading turns from patchy to smooth, darker in the crevices between shapes."></canvas>
+      <p class="fig-cap">Each dot on the outlines adds the light of every direction that reaches it unblocked, weighted by its angle. A handful of directions gives blotchy, hard-edged occlusion; a few hundred converge to smooth sky light, darker where the shapes crowd each other.</p>
+    </div>
+  </section>
+
+  <!-- 5. Foil -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The card · <b>hologram.js cardFoil, cardMarks, evalGlassWear</b></div>
+      <h2>Foil that throws rainbows</h2>
+      <p>The trading card's frame is holographic foil: a diffraction grating, fine ridges that send each wavelength off at its own angle. Which colour reaches the eye depends on the angle of each light and of the eye across the ridges, so the grating's direction is turned slowly across the card, and every part throws a different colour at a different tilt. A scatter of glitter flakes, tilted at random, glints one at a time. The name plate, text box, seal and stars are stamped into the window in the same foil.</p>
+      <p>Both cards carry wear: three layers of fine curved scratches that catch the light along their length, dust and lint, and real fingerprint scans laid on as grease (rougher reflections, a slight relief, a film over the hologram). A lamp just above the camera glints in the card as it swings through facing you.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>A strip of foil, tilted</h3>
+        <div class="controls">
+          <label>Tilt <input id="fT" type="range" min="-40" max="40" step="0.5" value="8"><output id="fTo">8°</output></label>
+        </div>
+      </div>
+      <canvas id="foilCanvas" aria-label="A wide strip of holographic foil in rainbow colours, its bands curving and drifting sideways as the tilt slider moves."></canvas>
+      <p class="fig-cap">First-order colour from the grating equation, plus fainter second and third orders, with the grating direction wandering across the strip. Tilting moves every band at once, but each by a different amount.</p>
+    </div>
+  </section>
+
+  <!-- 6. Tunnel -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The tunnel · <b>tunnel.js</b></div>
+      <h2>One tube, bent in the vertex shader</h2>
+      <p>The tunnel is a single long cylinder. Its vertex shader bends it: each point is moved off the straight line by how far the path ahead has turned from where the card is heading, so the tube is straight at the card, curves away into the distance, and never shows its end. It also slowly rolls, and takes a hexagonal cross-section for the hex hall.</p>
+      <p>Its wall is drawn in the fragment shader in one of seven neon styles, from plainest to busiest: rings, laser lanes, a synthwave grid, retro suns, a hexagonal hall with embers, tiles, and Memphis shapes. All of them sit on one lattice (24 lanes round, a lane's width along), so a new style can come in from ahead tile by tile, each cell switching in an ordered dither and flaring as it lands.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>The tube, from the side</h3>
+        <div class="controls">
+          <label>Bend <input id="tB" type="range" min="0" max="2" step="0.01" value="1"><output id="tBo">1.00</output></label>
+        </div>
+      </div>
+      <canvas id="tubeCanvas" aria-label="A side view of the tunnel: two walls with rings across them streaming leftward past a card at the left. Near the card the walls run straight; further down they swing up and down by the bend amount."></canvas>
+      <p class="fig-cap">The path's curve, minus its value and its slope at the card: what is left is zero and flat at the card, and grows with distance. The rings stream past as the card travels.</p>
+    </div>
+  </section>
+
+  <!-- Tunnel styles -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The tunnel's styles · <b>tunnelWall.js</b></div>
+      <h2>Seven neon styles</h2>
+      <p>Every style is a function of two numbers, the angle round the tube and the distance along it, evaluated per pixel and drawn as emission only. They share one lattice: 24 lanes round the tube, and a unit along it as long as a lane is wide (2π · 3.2 m / 24, about 0.84 m). In those units a style is mostly 2D shapes on a grid, written as distance functions, so their edges can be antialiased by the screen's own derivatives: every line is drawn as wide as a pixel at least, and where a pattern gets finer than a few pixels it fades to its average instead of shimmering. Lines are drawn as a crisp, bright core, and the glow round them comes from the pipeline's bloom. The whole wall rolls slowly, more the further down the tube.</p>
+      <p>The view below runs the day's own wall shader (imported from <code>tunnelWall.js</code>), looking down a straight stretch of the tube, with a stand-in beat at the song's 130 BPM.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Down the tube, live</h3>
+        <div class="controls">
+          <label>Style <select id="wS">
+            <option value="1">Rings</option><option value="4">Laser lanes</option><option value="3">Synthwave grid</option><option value="6">Retro suns</option><option value="2">Hex hall</option><option value="0">Tiles</option><option value="5">Memphis</option>
+          </select></label>
+          <label><input id="wKick" type="checkbox" checked> Kicks on the beat</label>
+          <label><input id="wStreaks" type="checkbox"> Light-speed streaks</label>
+          <label><input id="wDots" type="checkbox"> Dot spiral</label>
+          <button id="wHit" type="button" class="ghost">Kick</button>
+        </div>
+      </div>
+      <canvas id="wallCanvas" aria-label="A live view down a neon tunnel, its wall drawn in the chosen style, pulsing on a steady beat. A new style comes in from ahead tile by tile when chosen."></canvas>
+      <p class="fig-cap">Choosing a style sends it down the tube from ahead, tile by tile, as the day does on a phrase change. Kicks flash the wall, light a random scatter of its cells and send a ring of light away down the tube. The tube here stays round; in the day the hex hall's cross-section turns hexagonal.</p>
+    </div>
+    <div class="styles">
+      <article class="item"><img src="explainer/style-rings.jpg" alt="The rings style: cyan and magenta rings receding down the tube over a deep blue wall." loading="lazy"><div>
+        <h3>Rings</h3>
+        <p>A ring every four units (3.35 m), alternately cyan and magenta, drawn from the distance to the nearest ring along the tube. Fine rings run between them at a tenth of the brightness, four light strips run along the tube at the quarter turns, and a purple glow lies along the floor, brighter close to each ring.</p>
+        <p>On every beat a set of rings flashes, every fourth one, counted from the ring passing the card at that moment. With the travel locked to the tempo, that ring is at the card on the beat, so the flash lands there. This plainest style plays the song's first twelve seconds.</p>
+      </div></article>
+      <article class="item"><img src="explainer/style-laser.jpg" alt="The laser lanes: thin red and cyan lines running down the tube over a near-black wall." loading="lazy"><div>
+        <h3>Laser lanes</h3>
+        <p>A thin line runs down every other lane over a near-black wall, red or cyan by a hash of the lane. Each lane carries beams: a profile along the tube that is sharp at its head and falls off as (1 − x)⁶ behind it, repeating every eight units, offset per lane by the same hash so they stagger, and moving two units a beat toward the card. A faint violet ring every eight units ties the lanes together.</p>
+      </div></article>
+      <article class="item"><img src="explainer/style-grid.jpg" alt="The synthwave grid: magenta and cyan lines along and round the tube." loading="lazy"><div>
+        <h3>Synthwave grid</h3>
+        <p>The lattice itself, drawn as lines: the distance to the nearest line in each direction, round and along, with every fourth ring brighter. The tint slides from magenta to cyan with the angle and slowly along the tube. A scan of light, a sharp lobe (a cosine to the twelfth power) of the angle minus the beat, sweeps round the tube once a bar, slightly spiralled by the distance.</p>
+      </div></article>
+      <article class="item"><img src="explainer/style-suns.jpg" alt="The retro suns: striped sunset discs, triangles and squares in gradients along the tube." loading="lazy"><div>
+        <h3>Retro suns</h3>
+        <p>One shape to each 2×2 block of the lattice, picked by a hash: a sunset disc, a downward triangle or a square, each a distance function filled with a two-colour gradient from six palettes. The lower half is cut into stripes that widen toward the bottom, the eighties sunset, and the stripes slide down by one stripe every two beats; where they would be finer than a few pixels they fade to their average. Discs glow round their edge, the shapes breathe gently on the beat, and about one in eight is dark.</p>
+      </div></article>
+      <article class="item"><img src="explainer/style-hex.jpg" alt="The hex hall: dark panels in violet frames, bright gates and orange embers." loading="lazy"><div>
+        <h3>Hex hall</h3>
+        <p>In the day, the vertex shader turns the tube's cross-section into a hexagon: each point's radius is scaled by the hexagon's distance at its angle. The wall is four dark panels across each side, in thin violet frames, with a bright gate every twelve units in violet or blue. A quarter of the panels glow from behind, fading in and out on the beat at their own phase, and six cells in a hundred hold an ember: a small soft orange spot that flickers, and flares on the hats.</p>
+      </div></article>
+      <article class="item"><img src="explainer/style-tiles.jpg" alt="The tiles: rounded square outlines in bands of colour, a wave of light chasing round them." loading="lazy"><div>
+        <h3>Tiles</h3>
+        <p>A rounded square in every cell, drawn as the outline of a rounded-box distance function, coloured in bands of nine rows from a four-colour palette with a few accents, and one tile in five dark. A wave of light chases round the tiles in a spiral: each tile's brightness is a sine of its lane plus its row minus the beat, cubed so the crest is narrow. The wave steps a quarter turn on each beat with a short ease, so it moves in time rather than gliding.</p>
+      </div></article>
+      <article class="item"><img src="explainer/style-memphis.jpg" alt="Memphis: discs, triangles, zigzags, squares and hexagons in eighties colours over a faint grid." loading="lazy"><div>
+        <h3>Memphis</h3>
+        <p>The eighties' Memphis design: one shape to each 3×3 block over a faint grid, nudged off centre and turned a random amount, then turned a little further, either way, on every beat. Each is one of six distance functions: a disc graded from purple to cyan, a pink triangle, a yellow zigzag (a triangle wave in a band), an outlined cyan square, a disc in pink or yellow stripes, and an outlined orange hexagon. Filled shapes are drawn at less than half the brightness of the outlines and zigzags, so the wall stays busy without burning out.</p>
+      </div></article>
+      <article class="item"><img src="explainer/style-transition.jpg" alt="Tiles coming in over the rings, cell by cell, in an ordered dither." loading="lazy"><div>
+        <h3>Coming in, and the overlays</h3>
+        <p>A new style comes in from ahead over 60 m, cell by cell. Each cell switches whole when the style's progress passes its threshold: a 4×4 ordered (Bayer) dither of the lattice, roughened by a hash, so the change reads as tiles flipping. Each flares briefly as it switches.</p>
+        <p>Two overlays layer on as the song gets more hectic. Light-speed streaks run along 48 thin lanes, each at its own speed, faster than the wall, in segments of 18 to 40 m with a bright head and a long tail. A dot spiral is rings of glowing points 1.1 m apart, each ring turned 0.21 rad further than the last, the whole spiral turning as it comes. Every style fades with distance into a haze of its own colour.</p>
+      </div></article>
+    </div>
+  </section>
+
+  <!-- 7. Motion blur -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Motion blur · <b>tunnel.js tBand, tShape</b></div>
+      <h2>A smear in closed form</h2>
+      <p>At 14 metres a second, a neon ring near the camera crosses many pixels in one frame, and without blur it strobes. The first version averaged the wall at up to ten points along the frame's travel. That cost ten evaluations of the whole wall per pixel, and still showed the ring as a few separate copies.</p>
+      <p>A ring is a line across the tube, and a line swept along its own normal for a distance L has an exact average: a band L longer and correspondingly dimmer, with the same total light. So the line styles draw their rings already smeared, in one evaluation. Lines along the tube don't change at all. Embers and dots stretch into dashes, and each kick's flashing cells spill into their neighbours by how much of the travel crosses into them. Only the three shape styles (tiles, suns, Memphis) still take taps, and then only for the pattern, not the whole wall. The tunnel's frame time fell by a fifth to a third.</p>
+    </div>
+    <div class="formula">band(r) = min(2w + a, L + a) / (L + a) · (1 − smoothstep(|w − L/2|, w + L/2 + a, r))<br><span class="c">r: distance to the line along the tube; w: its half-width; a: a pixel; L: the travel during the shutter. At L = 0 it is the still line.</span></div>
+    <div class="fig">
+      <div class="fig-head"><h3>A ring, streaming past</h3>
+        <div class="controls">
+          <label>Travel <input id="mL" type="range" min="0" max="0.6" step="0.005" value="0.28"><output id="mLo">0.28 m</output></label>
+        </div>
+      </div>
+      <canvas id="blurCanvas" aria-label="A graph of brightness along the tunnel around one ring: a thin tall peak when still. With travel, a stepped curve of separate copies (the taps) and a smooth flat-topped band (closed form) of the same area."></canvas>
+      <div class="legend"><span style="color:var(--stage-ink)"><i></i>still</span><span style="color:var(--accent2)"><i></i>10 taps</span><span style="color:var(--accent)"><i></i>closed form</span></div>
+      <p class="fig-cap">Ten taps of a thin line give ten copies; the closed form gives the band they approximate, at the cost of one. Both hold the same light.</p>
+    </div>
+  </section>
+
+  <!-- 8. Reflections -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Reflections · <b>tunnel.js traceTunnel, hologram.js traceReflection</b></div>
+      <h2>Reflections traced, not rendered</h2>
+      <p>The glass and foil reflect the tunnel, and the tunnel is all that is there to reflect. At first it was rendered round the card into a cube map every frame and prefiltered: six faces of the tunnel, then a 256-sample convolution of every mip. That was a quarter of the frame. Now each pixel of the card traces its own reflected ray into the tube and runs the wall's shader where it lands: sharp, with true parallax, and almost free.</p>
+      <p>The tube is bent, so the ray first meets the straight tube, then the hit is bracketed and bisected against the bent one, and finally solved exactly against the circle the bend puts there. The footprint comes from the screen, so the far wall fades to its average instead of shimmering. On the dark glass, which reflects only a few percent, the reflection's range is compressed so the wall's dim fill and its flashing cells still show next to the bright lines.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>A reflected ray, finding the bent wall</h3>
+        <div class="controls">
+          <label>Card angle <input id="rA" type="range" min="-10" max="10" step="0.1" value="2"><output id="rAo">2°</output></label>
+          <label>Bend <input id="rB" type="range" min="0" max="2" step="0.01" value="1"><output id="rBo">1.00</output></label>
+        </div>
+      </div>
+      <canvas id="traceCanvas" aria-label="A side view of the bent tunnel with the card in it. A ray from the camera on the right bounces off the card and heads down the tunnel. A hollow dot marks where it would hit a straight tube; small dots mark the bisection's steps, converging on the true hit on the bent wall."></canvas>
+      <p class="fig-cap">Hollow dot: the straight tube's hit, the first guess. Small dots: the bisection, between a point inside and a point outside the bent tube. Filled dot: the hit. Far down the tube the straight guess can be metres off.</p>
+    </div>
+  </section>
+
+  <!-- 9. Music -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The music · <b>main.js updateBeat, tunnel.js update, music.js</b></div>
+      <h2>Keeping time</h2>
+      <p>The soundtrack was analysed offline with batec<sup>*</sup> into a beat map: its tempo and bars, kicks and hats, sections, and curves of how intense and how hectic it is. While it plays, the tunnel's animations step on the song's beat (the tiles' chase, every fourth ring flashing as it passes the card, the grid's scan once a bar), kicks flash the wall, light a scatter of its cells and send a ring of light down it, and the style follows how hectic the song is, changing on 8-bar phrases. A new card spins up a bar early and lands on the next phrase's first beat, after a little wind-up.</p>
+      <p>Even the travel keeps time: the speed snaps to a whole number of rings a beat, and the travel is eased into phase so a ring passes the card on every beat. The music's clock is what the speakers play: the audio context runs ahead of them by its output latency, a fraction of a second over Bluetooth, and that is taken off. The song only starts once the page renders smoothly, with no shader left to compile.</p>
+      <p class="fig-cap"><sup>*</sup> batec is a work-in-progress library, a tool for analysing sound and syncing visuals to it. Its analysis, its beat-map format and its runtime are still changing; this day uses an early version, vendored in <code>third_party/batec/</code>.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Rings and beats</h3>
+        <div class="controls">
+          <label><input id="lOn" type="checkbox" checked> Lock to the beat</label>
+        </div>
+      </div>
+      <canvas id="lockCanvas" aria-label="Ticks for the rings slide left past a centre line, the card, which blinks on every beat. With the lock on, a ring sits on the line at each blink; off, they drift."></canvas>
+      <div class="readout"><span>rings a beat <b id="lRings">2</b></span><span>phase error <b id="lErr">0 ms</b></span></div>
+      <p class="fig-cap">The centre line is the card, blinking on the beat. Locked, the travel is nudged until a ring crosses on every blink, and the ring passing each beat is always the same colour; unlocked, at the slider's speed, they drift through.</p>
+    </div>
+  </section>
+
+  <!-- 10. Changes -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Smooth changes · <b>diorama.js prepare, scenes.js, smudge.js</b></div>
+      <h2>Building the next card between frames</h2>
+      <p>A new card is a lot of work: building the scene (some 150 thousand vertices for the gears), merging it, 248 bake passes, a shadow map, and a fresh set of fingerprints. All of it runs a slice a frame while the old card spins: a gear or a piece a frame, the merge in chunks of 15 thousand vertices, eight bake directions a frame, twenty fingerprints a frame. The new card goes on as the old one passes edge-on. Each card is its own shader program, both compiled while the page loads, so a flip never waits on a compile.</p>
+    </div>
+    <div class="facts">
+      <div class="fact"><b>Bands</b><span>8 a frame (6 on phones), each one draw into one channel, 2 buffers.</span></div>
+      <div class="fact"><b>Bake</b><span>248 directions, 8 a frame, the first frame alone (it uploads the mesh).</span></div>
+      <div class="fact"><b>Bursts</b><span>Day 2's shapes at 60% tessellation, the smallest chips left out: 350k → 155k vertices.</span></div>
+      <div class="fact"><b>Reflections</b><span>Traced per pixel, no cube map: −0.8 ms a frame.</span></div>
+      <div class="fact"><b>Motion blur</b><span>Closed form for lines, pattern-only taps for shapes: 20–30% faster frames.</span></div>
+      <div class="fact"><b>Music</b><span>Starts after 3 smooth frames with no new shader, its clock corrected for output latency.</span></div>
+    </div>
+  </section>
+
+  <!-- 11. Controls -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Using it</div>
+      <h2>Controls</h2>
+    </div>
+    <ul class="keys col">
+      <li><b>Drag</b> to spin the card; it keeps turning, then settles back to face you. <b>Scroll</b> to zoom.</li>
+      <li><b>R</b> or the button for a new card; with the music it changes every 8 bars by itself.</li>
+      <li><b>M</b> or the speaker button for sound; <b>C</b> copies a link to the exact moment.</li>
+      <li>The panel: card, scene and seed; the hologram's colour, bandwidth, swelling, viewing zone and dispersion; rings and their tracks; the glass and its reflection; the motion.</li>
+      <li><b>Space</b> pauses, <b>F</b> goes fullscreen, <b>Tab</b> hides the panel, <b>P</b> saves a screenshot.</li>
+    </ul>
+  </section>
+  <footer class="col">
+    <div class="meta">
+      <span><b>three.js</b> r187</span><span>WebGL2</span><span>white-light hologram replay</span><span>beat-mapped with batec</span><span>no build step</span>
+    </div>
+    Day 15 of <a href="../">Codevember 2026</a> by Jaume Sanchez Elias. See it live at <a href="https://spite.github.io/codevember-2026/15/">spite.github.io/codevember-2026/15</a>; the source is in <a href="https://github.com/spite/codevember-2026/tree/main/15">15/ of the codevember-2026 repository</a>. The holographic shader is spite's own, brought into the <a href="../modules/pipeline/explainer.html">photographic pipeline</a> here.
+  </footer>
+</main>
+
+<script>
+(() => {
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const $ = (id) => document.getElementById(id);
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const font = (px, w = 400) => `${w} ${px}px ${css("--mono") || "monospace"}`;
+  const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+
+  function setup(canvas, aspect, draw) {
+    const ctx = canvas.getContext("2d");
+    let lastW = -1, W = 0, H = 0;
+    const fit = (force) => {
+      if (force !== true && canvas.clientWidth === lastW) return;
+      lastW = canvas.clientWidth;
+      W = canvas.clientWidth || 600; H = Math.round(W * aspect);
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); canvas.style.height = H + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      draw(ctx, W, H);
+    };
+    new ResizeObserver(() => requestAnimationFrame(fit)).observe(canvas);
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => fit(true));
+    new MutationObserver(() => fit(true)).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return { redraw: () => fit(true), size: () => [W, H], ctx };
+  }
+  function animate(canvas, step) {
+    let on = false, last = 0;
+    new IntersectionObserver(([e]) => { on = e.isIntersecting; if (on) { last = performance.now(); requestAnimationFrame(loop); } }).observe(canvas);
+    function loop(now) {
+      if (!on) return;
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      step(dt);
+      requestAnimationFrame(loop);
+    }
+  }
+  // A slider's output kept up to date; fn runs on input (the figures draw themselves the first time).
+  const bind = (id, out, fmt, fn) => { const el = $(id); const o = $(out); const show = () => { if (o) o.textContent = fmt(+el.value); }; el.addEventListener("input", () => { show(); fn(); }); show(); return el; };
+
+  // The day's visible spectrum (Alan Zucconi's fit), as in hologram.js: wavelength (nm) to linear RGB.
+  function spectral(w) {
+    const x = clamp((w - 400) / 300, 0, 1);
+    const bump = (cx, cy, k) => clamp(1 - (k * (x - cx)) ** 2 - cy, 0, 1);
+    const r = bump(0.69549072, 0.02312639, 3.54585104) + bump(0.11748627, 0.8489713, 3.9030714);
+    const g = bump(0.49228336, 0.15225084, 2.93225262) + bump(0.86755042, 0.88445281, 3.21182957);
+    const b = bump(0.2769988, 0.52607955, 2.41593945) + bump(0.6607786, 0.73949448, 3.96587128);
+    const win = smoothstep(385, 435, w) * (1 - smoothstep(660, 725, w));
+    return [r * win, g * win, b * win];
+  }
+  const rgb = ([r, g, b], a = 1) => `rgba(${Math.round(255 * Math.min(1, r) ** 0.6)},${Math.round(255 * Math.min(1, g) ** 0.6)},${Math.round(255 * Math.min(1, b) ** 0.6)},${a})`;
+  const cosIn = (c) => Math.sqrt(1 - (1 - c * c) / (1.52 * 1.52));
+
+  // 1. Bragg replay: the plate's normal points right (+x); the reference beam comes from the front and 45° above.
+  {
+    const A = bind("bA", "bAo", (v) => `${v}°`, () => fig.redraw());
+    const L = bind("bL", "bLo", (v) => `${v} nm`, () => fig.redraw());
+    const fig = setup($("braggCanvas"), 0.5, (ctx, W, H) => {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const px = W * 0.32, py = H * 0.42, half = H * 0.32;
+      const nf = [Math.cos(Math.PI / 8), Math.sin(Math.PI / 8)];
+      const cosRec = cosIn(Math.cos(Math.PI / 8));
+      const a = (+A.value * Math.PI) / 180;
+      const Ld = [Math.cos(a), Math.sin(a)];
+      const view = [Math.cos(-0.12), Math.sin(-0.12)];
+      const lambda = (+L.value * cosIn(clamp(Ld[0] * nf[0] + Ld[1] * nf[1], 0, 1))) / cosRec;
+      const h = [Ld[0] + view[0], Ld[1] + view[1]], hl = Math.hypot(...h);
+      const lobe = 0.15 + 0.85 * Math.exp(((h[0] * nf[0] + h[1] * nf[1]) / hl - 1) / 0.3);
+      const col = spectral(lambda);
+      // The plate and its fringes, perpendicular to nf.
+      ctx.fillStyle = "rgba(160,150,200,0.12)"; ctx.fillRect(px - 10, py - half, 20, half * 2);
+      ctx.save(); ctx.beginPath(); ctx.rect(px - 10, py - half, 20, half * 2); ctx.clip();
+      ctx.strokeStyle = "rgba(190,180,230,0.45)"; ctx.lineWidth = 1;
+      for (let k = -40; k <= 40; k++) {
+        const ox = px + k * 4 * nf[0], oy = py - k * 4 * nf[1];
+        ctx.beginPath(); ctx.moveTo(ox - nf[1] * 400, oy - nf[0] * 400); ctx.lineTo(ox + nf[1] * 400, oy + nf[0] * 400); ctx.stroke();
+      }
+      ctx.restore();
+      // The reference beam's direction, dashed.
+      ctx.setLineDash([4, 5]); ctx.strokeStyle = css("--stage-ink"); ctx.beginPath();
+      ctx.moveTo(px + 10, py); ctx.lineTo(px + 10 + Math.cos(Math.PI / 4) * W * 0.3, py - Math.sin(Math.PI / 4) * W * 0.3); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = css("--stage-ink"); ctx.font = font(11); ctx.fillText("reference", px + 14 + Math.cos(Math.PI / 4) * W * 0.3 - 40, py - Math.sin(Math.PI / 4) * W * 0.3 - 6);
+      // The lamp's light, white, coming in.
+      const lr = Math.min(W * 0.42, H * 0.36), lx = px + 10 + Ld[0] * lr, ly = py - Ld[1] * lr;
+      ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(lx, ly); ctx.lineTo(px + 10, py); ctx.stroke();
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(lx, ly, 7, 0, 7); ctx.fill();
+      ctx.fillStyle = css("--stage-ink"); ctx.fillText("lamp", lx + 10, ly + 4);
+      // The replayed beam toward the eye, in its colour.
+      const er = W * 0.5, ex = px + 10 + view[0] * er, ey = py - view[1] * er;
+      ctx.strokeStyle = rgb(col, 0.3 + 0.7 * lobe); ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(px + 10, py); ctx.lineTo(ex, ey); ctx.stroke();
+      ctx.strokeStyle = css("--stage-ink"); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.ellipse(ex + 12, ey, 12, 7, 0, 0, 7); ctx.stroke();
+      ctx.fillStyle = css("--stage-ink"); ctx.beginPath(); ctx.arc(ex + 12, ey, 3, 0, 7); ctx.fill();
+      // The spectrum strip with the replayed wavelength marked.
+      const sx = W * 0.08, sw = W * 0.84, sy = H * 0.86, sh = 10;
+      for (let i = 0; i < sw; i++) { ctx.fillStyle = rgb(spectral(400 + (300 * i) / sw)); ctx.fillRect(sx + i, sy, 1.5, sh); }
+      const mx = sx + (sw * (lambda - 400)) / 300;
+      ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.moveTo(mx, sy - 2); ctx.lineTo(mx - 5, sy - 10); ctx.lineTo(mx + 5, sy - 10); ctx.fill();
+      ctx.fillStyle = css("--stage-ink"); ctx.font = font(11); ctx.fillText("400 nm", sx, sy + sh + 14); ctx.fillText("700 nm", sx + sw - 44, sy + sh + 14);
+      $("bOut").textContent = `${lambda.toFixed(0)} nm`; $("bBright").textContent = lobe.toFixed(2);
+    });
+  }
+
+  // 2. Bands: three points at three depths, each copied once per band, sheared by its wavelength's distance from λB.
+  {
+    const D = bind("sD", "sDo", (v) => v.toFixed(2), () => fig.redraw());
+    const Wd = bind("sW", "sWo", (v) => `${v} nm`, () => fig.redraw());
+    const N = bind("sN", "sNo", (v) => `${v}`, () => fig.redraw());
+    const fig = setup($("bandCanvas"), 0.42, (ctx, W, H) => {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const lambdaB = 560, bands = +N.value, bw = +Wd.value, disperse = +D.value;
+      const points = [{ x: 0.2, depth: 1, label: "in front" }, { x: 0.5, depth: 0, label: "on the plate" }, { x: 0.8, depth: -1, label: "behind" }];
+      ctx.globalCompositeOperation = "lighter";
+      for (const p of points) {
+        let norm = 0;
+        const copies = [];
+        for (let k = 0; k < bands; k++) {
+          const t = bands === 1 ? 0 : ((k + 0.5) / bands) * 2 - 1;
+          const lambda = lambdaB + t * 2 * bw;
+          const c = spectral(lambda), g = Math.exp(-4 * t * t);
+          norm += g * (0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]);
+          copies.push({ shift: ((t * 2 * bw) / lambdaB) * disperse * p.depth * H * 1.6, c, g });
+        }
+        for (const { shift, c, g } of copies) {
+          const s = (g / Math.max(norm, 1e-3)) * 0.9;
+          const gr = ctx.createRadialGradient(W * p.x, H * 0.45 + shift, 0, W * p.x, H * 0.45 + shift, H * 0.09);
+          gr.addColorStop(0, rgb([c[0] * s, c[1] * s, c[2] * s]));
+          gr.addColorStop(1, "rgba(0,0,0,0)");
+          ctx.fillStyle = gr; ctx.fillRect(W * p.x - H * 0.1, H * 0.45 + shift - H * 0.1, H * 0.2, H * 0.2);
+        }
+      }
+      ctx.globalCompositeOperation = "source-over";
+      ctx.fillStyle = css("--stage-ink"); ctx.font = font(12); ctx.textAlign = "center";
+      for (const p of points) ctx.fillText(p.label, W * p.x, H * 0.93);
+      ctx.textAlign = "left";
+    });
+  }
+
+  // 3. Bake: sky visibility on the outlines of a few circles over a floor, from N directions.
+  {
+    const circles = [[0.35, 0.62, 0.17], [0.58, 0.68, 0.11], [0.72, 0.55, 0.14], [0.47, 0.4, 0.09]];
+    const samples = [];
+    for (const [cx, cy, r] of circles) for (let i = 0; i < 70; i++) { const a = (i / 70) * Math.PI * 2; samples.push({ x: cx + Math.cos(a) * r, y: cy - Math.sin(a) * r, nx: Math.cos(a), ny: Math.sin(a) }); }
+    for (let i = 0; i <= 80; i++) samples.push({ x: 0.08 + (0.84 * i) / 80, y: 0.85, nx: 0, ny: 1 });
+    const blocked = (x, y, dx, dy) => {
+      for (const [cx, cy, r] of circles) {
+        const ox = x - cx, oy = y - cy, b = ox * dx + oy * -dy, c = ox * ox + oy * oy - r * r;
+        const disc = b * b - c;
+        if (disc > 0 && -b - Math.sqrt(disc) > 1e-4) return true;
+      }
+      return false;
+    };
+    const K = bind("kN", "kNo", (v) => `${v}`, () => fig.redraw());
+    const fig = setup($("bakeCanvas"), 0.5, (ctx, W, H) => {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const n = +K.value;
+      // Directions spread evenly over the upper half circle, as the Fibonacci sphere spreads them over the sky.
+      const dirs = Array.from({ length: n }, (_, i) => { const a = (Math.PI * (i + 0.5)) / n; return [Math.cos(a), Math.sin(a)]; });
+      for (const s of samples) {
+        let sum = 0, wsum = 0;
+        for (const [dx, dy] of dirs) {
+          const c = dx * s.nx + dy * s.ny;
+          wsum += Math.max(dy, 0);
+          if (c <= 0) continue;
+          if (!blocked(s.x + s.nx * 0.004, s.y - s.ny * 0.004, dx, dy)) sum += c;
+        }
+        const v = clamp((sum / Math.max(wsum, 1e-3)) * 1.3, 0, 1);
+        ctx.fillStyle = `rgb(${Math.round(40 + 215 * v)},${Math.round(36 + 200 * v)},${Math.round(60 + 195 * v)})`;
+        ctx.beginPath(); ctx.arc((s.x - 0.5) * H * 1.15 + W / 2, (s.y - 0.1) * H * 1.15, 2.6, 0, 7); ctx.fill();
+      }
+      // A few of the directions, as rays from the top.
+      ctx.strokeStyle = "rgba(255,255,255,0.12)"; ctx.lineWidth = 1;
+      const shown = Math.min(n, 40);
+      for (let i = 0; i < shown; i++) { const [dx, dy] = dirs[Math.floor((i * n) / shown)]; const ox = W / 2, oy = 0.75 * H * 1.15; ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(ox + dx * W, oy - dy * W); ctx.stroke(); }
+    });
+  }
+
+  // 4. Foil: a strip of grating whose direction wanders across it; first, second and third orders.
+  {
+    const hash = (x, y) => { const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453; return s - Math.floor(s); };
+    const noise = (x, y) => { const ix = Math.floor(x), iy = Math.floor(y), fx = x - ix, fy = y - iy, u = fx * fx * (3 - 2 * fx), v = fy * fy * (3 - 2 * fy);
+      const a = hash(ix, iy), b = hash(ix + 1, iy), c = hash(ix, iy + 1), d = hash(ix + 1, iy + 1); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; };
+    const T = bind("fT", "fTo", (v) => `${v}°`, () => fig.redraw());
+    const fig = setup($("foilCanvas"), 0.28, (ctx, W, H) => {
+      const tilt = (+T.value * Math.PI) / 180;
+      const img = ctx.createImageData(Math.ceil(W / 2), Math.ceil(H / 2));
+      const lx = Math.sin(0.5), ly = Math.sin(0.35);
+      for (let j = 0; j < img.height; j++) for (let i = 0; i < img.width; i++) {
+        const u = i / img.width, v = j / img.height;
+        const f = (u * 2.6 + v * 0.7) * 0.7071;
+        const ga = f * 5 + noise(u * 6, v * 3) * 1.2;
+        const k = (lx + Math.sin(tilt + (u - 0.5) * 0.6)) * Math.cos(ga) + (ly + Math.sin(tilt * 0.5)) * Math.sin(ga);
+        const a = Math.abs(k) * 1100;
+        const c1 = spectral(a), c2 = spectral(a / 2), c3 = spectral(a / 3);
+        const c = [0, 1, 2].map((q) => 0.08 + c1[q] + 0.3 * c2[q] + 0.1 * c3[q]);
+        const o = (j * img.width + i) * 4;
+        img.data[o] = 255 * Math.min(1, c[0]) ** 0.7; img.data[o + 1] = 255 * Math.min(1, c[1]) ** 0.7; img.data[o + 2] = 255 * Math.min(1, c[2]) ** 0.7; img.data[o + 3] = 255;
+      }
+      const off = document.createElement("canvas"); off.width = img.width; off.height = img.height; off.getContext("2d").putImageData(img, 0, 0);
+      ctx.imageSmoothingEnabled = true; ctx.drawImage(off, 0, 0, W, H);
+    });
+  }
+
+  // The tunnel's path, as in tunnel.js (one of its two components), and its offset from the straight line at the card.
+  const curve = (s) => (Math.sin(s * 0.021) + 0.6 * Math.sin(s * 0.037 + 2.0)) * 18;
+  const slope = (s) => (0.021 * Math.cos(s * 0.021) + 0.0222 * Math.cos(s * 0.037 + 2.0)) * 18;
+  const offsetAt = (travel, d, bend) => (curve(travel + d) - curve(travel) - slope(travel) * d) * bend;
+  const RADIUS = 3.2, RING = (4 * 2 * Math.PI * RADIUS) / 24;
+
+  // 5. The tube from the side, streaming.
+  {
+    let travel = 120;
+    const Bn = bind("tB", "tBo", (v) => v.toFixed(2), () => fig.redraw());
+    const fig = setup($("tubeCanvas"), 0.36, (ctx, W, H) => {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const bend = +Bn.value, x0 = W * 0.06, sx = (W * 0.9) / 100, cy = H * 0.5;
+      let reach = RADIUS; for (let d = 0; d <= 100; d += 2) reach = Math.max(reach, Math.abs(offsetAt(travel, d, bend)) + RADIUS);
+      const sy = (H * 0.46) / reach;
+      const at = (d, side) => [x0 + d * sx, cy - (offsetAt(travel, d, bend) + side * RADIUS) * sy];
+      for (const side of [-1, 1]) {
+        ctx.strokeStyle = "rgba(180,155,255,0.9)"; ctx.lineWidth = 2; ctx.beginPath();
+        for (let d = 0; d <= 100; d += 1) { const [x, y] = at(d, side); d ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+        ctx.stroke();
+      }
+      const first = Math.ceil(travel / RING);
+      for (let k = first; (k * RING - travel) <= 100; k++) {
+        const d = k * RING - travel, [x1, y1] = at(d, -1), [x2, y2] = at(d, 1);
+        ctx.strokeStyle = k % 2 ? "rgba(217,38,255,0.55)" : "rgba(31,140,255,0.6)"; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2); ctx.stroke();
+      }
+      ctx.fillStyle = "#fff"; ctx.fillRect(x0 - 2, cy - RADIUS * sy * 0.35, 4, RADIUS * sy * 0.7);
+      ctx.fillStyle = css("--stage-ink"); ctx.font = font(11); ctx.fillText("card", x0 + 6, cy + RADIUS * sy * 0.35 + 12); ctx.fillText("100 m ahead →", W - 110, H - 8);
+    });
+    animate($("tubeCanvas"), (dt) => { travel += dt * 14.5; fig.redraw(); });
+  }
+
+  // 6. Motion blur: one ring's profile along the tube, still, as 10 taps, and in closed form.
+  {
+    const width = 0.035, a = 0.01;
+    const line = (r) => 1 - smoothstep(width, width + a, Math.abs(r));
+    const band = (r, L) => { const fade = Math.min(2 * width + a, L + a) / (L + a); return fade * (1 - smoothstep(Math.abs(width - L / 2), width + L / 2 + a, Math.abs(r))); };
+    const Lr = bind("mL", "mLo", (v) => `${v.toFixed(2)} m`, () => fig.redraw());
+    const fig = setup($("blurCanvas"), 0.4, (ctx, W, H) => {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const L = +Lr.value, span = 0.8, base = H * 0.86, top = H * 0.1;
+      const X = (s) => W * 0.04 + ((s + span / 2) / span) * W * 0.92, Y = (v) => base - v * (base - top);
+      const plot = (f, color, lw) => { ctx.strokeStyle = color; ctx.lineWidth = lw; ctx.beginPath(); for (let i = 0; i <= 600; i++) { const s = -span / 2 + (span * i) / 600; const v = f(s); i ? ctx.lineTo(X(s), Y(v)) : ctx.moveTo(X(s), Y(v)); } ctx.stroke(); };
+      ctx.strokeStyle = css("--stage-ink"); ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(0, base); ctx.lineTo(W, base); ctx.stroke();
+      plot(line, css("--stage-ink"), 1.5);
+      const n = 10;
+      plot((s) => { let v = 0; for (let i = 0; i < n; i++) v += line(s + (L > 0 ? L * ((i + 0.5) / n - 0.5) : 0)); return v / n; }, css("--accent2"), 2);
+      plot((s) => band(s, L), css("--accent"), 2.5);
+    });
+  }
+
+  // 7. Tracing a reflected ray into the bent tube: the straight guess, the bisection, the hit.
+  {
+    const A = bind("rA", "rAo", (v) => `${v.toFixed(1)}°`, () => fig.redraw());
+    const Bn = bind("rB", "rBo", (v) => v.toFixed(2), () => fig.redraw());
+    const travel = 300;
+    const fig = setup($("traceCanvas"), 0.42, (ctx, W, H) => {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const bend = +Bn.value, sx = (W * 0.86) / 120, x0 = W * 0.92, cy = H * 0.5;
+      // d: distance ahead of the card (it faces the camera, so it reflects the tunnel behind the camera: negative d, to
+      // the left); y up.
+      let reach = RADIUS; for (let d = -120; d <= 4; d += 2) reach = Math.max(reach, Math.abs(offsetAt(travel, d, bend)) + RADIUS);
+      const sy = (H * 0.46) / reach;
+      const P = (d, y) => [x0 + d * sx, cy - y * sy];
+      for (const side of [-1, 1]) {
+        ctx.strokeStyle = "rgba(180,155,255,0.85)"; ctx.lineWidth = 2; ctx.beginPath();
+        for (let d = -120; d <= 4; d += 1) { const [x, y] = P(d, offsetAt(travel, d, bend) + side * RADIUS); d > -120 ? ctx.lineTo(x, y) : ctx.moveTo(x, y); }
+        ctx.stroke();
+      }
+      // The card at d = 0, tilted; the camera ray comes from d = -6 at a slight angle and reflects.
+      const t = (+A.value * Math.PI) / 180;
+      // The card's normal faces the camera, back along negative d.
+      const nN = [-Math.cos(t), Math.sin(t)];
+      const cam = [-7, 0.6], hitCard = [0, 0];
+      const v = [hitCard[0] - cam[0], hitCard[1] - cam[1]], vl = Math.hypot(...v), vd = [v[0] / vl, v[1] / vl];
+      const dot = vd[0] * nN[0] + vd[1] * nN[1];
+      const R = [vd[0] - 2 * dot * nN[0], vd[1] - 2 * dot * nN[1]];
+      const [cx1, cy1] = P(0, -RADIUS * 0.5), [cx2, cy2] = P(0, RADIUS * 0.5);
+      const tx = Math.sin(t) * RADIUS * 0.5 * sy;
+      ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cx1 - tx, cy1); ctx.lineTo(cx2 + tx, cy2); ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.6)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(...P(...cam)); ctx.lineTo(...P(0, 0)); ctx.stroke();
+      ctx.fillStyle = css("--stage-ink"); ctx.font = font(11); { const [x, y] = P(...cam); ctx.fillText("camera", x - 30, y - 8); ctx.beginPath(); ctx.arc(x, y, 4, 0, 7); ctx.fill(); }
+      // outside(t): how far past the bent wall the reflected ray is, t along it.
+      const outside = (s) => { const d = R[0] * s, y = R[1] * s; return Math.abs(y - offsetAt(travel, d, bend)) - RADIUS; };
+      const straight = Math.abs(R[1]) > 1e-4 ? (Math.sign(R[1]) * RADIUS) / R[1] : 400;
+      let lo = 0, hi = Math.min(straight, 400);
+      for (let i = 0; i < 4 && outside(hi) <= 0; i++) { lo = hi; hi *= 2; }
+      const steps = [];
+      for (let i = 0; i < 7; i++) { const m = 0.5 * (lo + hi); steps.push(m); if (outside(m) > 0) hi = m; else lo = m; }
+      const hit = hi;
+      ctx.strokeStyle = "rgba(255,122,184,0.9)"; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(...P(0, 0)); ctx.lineTo(...P(R[0] * hit, R[1] * hit)); ctx.stroke();
+      ctx.strokeStyle = "rgba(255,255,255,0.8)"; ctx.lineWidth = 1.5; { const [x, y] = P(R[0] * straight, R[1] * straight); ctx.beginPath(); ctx.arc(x, y, 6, 0, 7); ctx.stroke(); }
+      ctx.fillStyle = "rgba(255,255,255,0.55)"; for (const m of steps) { const [x, y] = P(R[0] * m, R[1] * m); ctx.beginPath(); ctx.arc(x, y, 2.2, 0, 7); ctx.fill(); }
+      ctx.fillStyle = css("--accent2"); { const [x, y] = P(R[0] * hit, R[1] * hit); ctx.beginPath(); ctx.arc(x, y, 5, 0, 7); ctx.fill(); }
+      ctx.fillStyle = css("--stage-ink"); ctx.fillText("← behind the camera, the way it came", 8, H - 8);
+    });
+  }
+
+  // 8. The beat lock: rings sliding past the card, the card blinking on the beat.
+  {
+    const bpm = 130, beatLen = 60 / bpm, slider = 14;
+    let beats = 0, travel = 1.3;
+    const on = $("lOn");
+    const fig = setup($("lockCanvas"), 0.18, (ctx, W, H) => {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const flash = Math.exp(-(beats - Math.floor(beats)) * 10);
+      const px = W / 2 / (4 * RING);
+      ctx.fillStyle = `rgba(255,255,255,${0.2 + 0.8 * flash})`; ctx.fillRect(W / 2 - 2, 0, 4, H);
+      for (let n = Math.floor(travel / RING) - 5; n <= Math.ceil(travel / RING) + 5; n++) {
+        const x = W / 2 + (n * RING - travel) * px;
+        ctx.fillStyle = n % 2 === 0 ? "#1f8cff" : "#d926ff"; ctx.fillRect(x - 3, H * 0.18, 6, H * 0.64);
+      }
+    });
+    animate($("lockCanvas"), (dt) => {
+      beats += dt / beatLen;
+      const perBeat = RING / beatLen, rings = Math.max(1, Math.round(slider / perBeat));
+      let speed = slider, err = 0;
+      if (on.checked) {
+        speed = rings * perBeat;
+        const phase = travel / RING - beats * rings;
+        err = phase - Math.round(phase);
+        travel += dt * speed - err * RING * (1 - Math.exp(-4 * dt));
+      } else {
+        travel += dt * speed;
+        const phase = travel / RING - beats * rings;
+        err = phase - Math.round(phase);
+      }
+      $("lRings").textContent = on.checked ? rings : (slider / perBeat).toFixed(2);
+      $("lErr").textContent = `${Math.round(((err * RING) / speed) * 1000)} ms`;
+      fig.redraw();
+    });
+  }
+})();
+</script>
+<script type="module">
+// The live tunnel: the day's own wall shader (tunnelWall.js), seen down a straight stretch of tube, on a stand-in beat.
+import { WALL_GLSL, RADIUS } from "./tunnelWall.js";
+const canvas = document.getElementById("wallCanvas");
+const gl = canvas.getContext("webgl2", { antialias: false });
+if (gl) {
+  const vs = `#version 300 es
+in vec2 p; void main() { gl_Position = vec4(p, 0.0, 1.0); }`;
+  const fs = `#version 300 es
+precision highp float;
+uniform vec2 uRes;
+uniform float tunnelTravel;
+uniform float tunnelTime;
+${WALL_GLSL}
+out vec4 o;
+void main() {
+  vec2 p = (gl_FragCoord.xy - 0.5 * uRes) / uRes.y;
+  // Just off the axis, looking down the tube, drifting a little.
+  vec3 ro = vec3(0.5 * sin(tunnelTime * 0.31), 0.35 * cos(tunnelTime * 0.23), 0.0);
+  vec3 rd = normalize(vec3(p, -1.35));
+  float A = max(dot(rd.xy, rd.xy), 1e-6), B = dot(ro.xy, rd.xy), C = dot(ro.xy, ro.xy) - RADIUS_T * RADIUS_T;
+  float t = (-B + sqrt(max(B * B - A * C, 0.0))) / A;
+  vec3 H = ro + rd * t;
+  float a = atan(H.y, H.x), s = tunnelTravel - H.z;
+  vec3 c = tunnelBlendAt(a, s, -H.z, 0.0, tAngleWidth(a), fwidth(s), 0.0) * tunnelLight;
+  c = c / (1.0 + c);
+  o = vec4(pow(c, vec3(1.0 / 2.2)), 1.0);
+}`;
+  const sh = (type, src) => { const x = gl.createShader(type); gl.shaderSource(x, src); gl.compileShader(x); if (!gl.getShaderParameter(x, gl.COMPILE_STATUS)) console.error(gl.getShaderInfoLog(x)); return x; };
+  const prog = gl.createProgram();
+  gl.attachShader(prog, sh(gl.VERTEX_SHADER, vs));
+  gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, fs));
+  gl.linkProgram(prog);
+  gl.useProgram(prog);
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, "p");
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  const U = {};
+  const set = (name, v) => { U[name] ??= gl.getUniformLocation(prog, name); gl.uniform1f(U[name], v); };
+  const RING = (4 * 2 * Math.PI * RADIUS) / 24, BPM = 130;
+  const st = { time: 0, beats: 0, travel: 40, from: 1, to: 1, gate: -1e9, kick: 0, kickN: 0, hat: 0, hatN: 0, waveAt: -1e4, wave: 0, cardRing: 0, beat: -1, streaks: 0, dots: 0 };
+  const $ = (id) => document.getElementById(id);
+  $("wS").addEventListener("change", (e) => {
+    // What the card is in becomes the old style; the new one comes from ahead.
+    if (st.travel >= st.gate + 30) st.from = st.to;
+    st.to = +e.target.value;
+    st.gate = st.travel + 12;
+  });
+  const kick = () => { st.kick = 1; st.kickN = (st.kickN + 1) % 997; st.waveAt = st.travel; st.wave = 1; };
+  $("wHit").addEventListener("click", kick);
+  const fit = () => {
+    const w = canvas.clientWidth || 600, h = Math.round(w * 0.5), dpr = Math.min(2, devicePixelRatio || 1);
+    canvas.style.height = h + "px";
+    canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+    gl.viewport(0, 0, canvas.width, canvas.height);
+  };
+  new ResizeObserver(fit).observe(canvas);
+  fit();
+  let on = false, last = 0;
+  new IntersectionObserver(([e]) => { on = e.isIntersecting; if (on) { last = performance.now(); requestAnimationFrame(frame); } }).observe(canvas);
+  function frame(now) {
+    if (!on) return;
+    const dt = Math.min(0.05, (now - last) / 1000); last = now;
+    const k = (r) => Math.exp(-r * dt);
+    st.time += dt;
+    st.beats += (dt * BPM) / 60;
+    // Two rings a beat, as the day locks it at its default speed.
+    st.travel = (st.beats * 2 + 0) * RING + 40;
+    const beat = Math.floor(st.beats);
+    if (beat !== st.beat) {
+      st.beat = beat;
+      st.cardRing = Math.round(st.travel / RING);
+      if ($("wKick").checked && beat % 2 === 0) kick();
+      if ($("wKick").checked) { st.hat = 0.8; st.hatN = (st.hatN + 1) % 997; }
+    }
+    if (st.travel > st.gate + 120) st.from = st.to;
+    st.kick *= k(5); st.hat *= k(8); st.wave *= k(1.2);
+    st.streaks += (($("wStreaks").checked ? 1 : 0) - st.streaks) * (1 - k(2));
+    st.dots += (($("wDots").checked ? 1 : 0) - st.dots) * (1 - k(2));
+    gl.uniform2f(U.uRes ??= gl.getUniformLocation(prog, "uRes"), canvas.width, canvas.height);
+    set("tunnelTravel", st.travel); set("tunnelTime", st.time); set("tunnelBeats", st.beats);
+    set("tunnelFrom", st.from); set("tunnelTo", st.to); set("tunnelGate", st.gate);
+    set("tunnelKick", st.kick); set("tunnelKickN", st.kickN); set("tunnelHat", st.hat); set("tunnelHatN", st.hatN);
+    set("tunnelWaveS", st.waveAt + (st.travel - st.waveAt) * 4); set("tunnelWaveAmp", st.wave);
+    set("tunnelStreaks", st.streaks); set("tunnelDots", st.dots); set("tunnelCardRing", st.cardRing);
+    set("tunnelGain", 1.3); set("tunnelLight", 1); set("tunnelAutoPulse", $("wKick").checked ? 0 : 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    requestAnimationFrame(frame);
+  }
+} else canvas.replaceWith(Object.assign(document.createElement("p"), { className: "fig-cap", textContent: "This figure needs WebGL2." }));
+</script>
+</body>
+</html>

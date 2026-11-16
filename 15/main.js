@@ -89,7 +89,7 @@ function randomIn(controller, param, min, max, step) {
   controller.randomize = () => param.set(Math.round((min + Math.random() * (max - min)) / step) * step);
 }
 
-const gui = new GUI(setDay(), document.querySelector("#gui-container"), { expanded: true });
+const gui = new GUI(setDay(), document.querySelector("#gui-container"), { expanded: false });
 gui.addSection("Card");
 gui.addSelect("Card", params.shape, SHAPE_LIST.map((s) => s.id));
 gui.addSelect("Scene", params.scene, SCENES);

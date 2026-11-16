@@ -1,7 +1,7 @@
 // Light scenes for the hologram, beside the gear spray and the burst: Suzanne's head, a cluster of crystals, one big
 // gear with pinions round it, chess pieces on a board, a knot and an atom. Each builds in a frame or two, from a seed.
 // userData.surf: metalness, roughness, albedo, per mesh.
-import { BufferGeometry, Float32BufferAttribute, BufferAttribute, Group, Mesh, LatheGeometry, Vector2, Vector3, Quaternion, TorusKnotGeometry, TorusGeometry, IcosahedronGeometry, BoxGeometry, CylinderGeometry, SphereGeometry, RingGeometry, ConeGeometry } from "three";
+import { BufferGeometry, Float32BufferAttribute, BufferAttribute, Group, Mesh, LatheGeometry, Vector2, Vector3, Quaternion, TorusKnotGeometry, TorusGeometry, IcosahedronGeometry, BoxGeometry, CylinderGeometry, SphereGeometry, RingGeometry, ConeGeometry, Euler } from "three";
 import { mergeVertices } from "third_party/BufferGeometryUtils.js";
 import { RoundedBoxGeometry } from "third_party/three-rounded-box.js";
 import { suzanneGeometry } from "modules/suzanne/suzanneMesh.js";
@@ -82,8 +82,9 @@ async function headGeometry() {
 export function preloadLightScenes() {
   return headGeometry();
 }
+// The mesh comes pitched nose-down: tilted back (as day 10 does) so she faces the viewer, then turned a little either way.
 async function head(r, group) {
-  add(group, (await headGeometry()).clone(), SATIN, { quaternion: new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), (r() - 0.5) * 0.8) });
+  add(group, (await headGeometry()).clone(), SATIN, { quaternion: new Quaternion().setFromEuler(new Euler(-0.37, (r() - 0.5) * 0.8, 0, "YXZ")) });
 }
 
 // A star polyhedron in the middle, smaller solids round it at different depths.
