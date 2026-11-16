@@ -10,7 +10,7 @@
 //   direction in proportion to how far that band is from the plate's Bragg wavelength, and added in that band's colour.
 //   That is how a white-light hologram rebuilds each colour a little apart: points on the plate stay sharp, those in
 //   front or behind fan into spectra, with true parallax and occlusion.
-import { Scene, Mesh, Points, BufferGeometry, BufferAttribute, MeshStandardMaterial, MeshBasicMaterial, ShaderMaterial, GLSL3, DoubleSide, BackSide, WebGLRenderTarget, HalfFloatType, FloatType, LinearFilter, LinearMipmapLinearFilter, NearestFilter, Color, Vector3, Matrix4, Matrix3, SphereGeometry, PlaneGeometry, PMREMGenerator, OrthographicCamera, NoBlending, AdditiveBlending, CustomBlending, OneFactor, ConstantColorFactor, ConstantAlphaFactor, Vector4 } from "three";
+import { Scene, Mesh, Points, BufferGeometry, BufferAttribute, MeshStandardMaterial, MeshBasicMaterial, ShaderMaterial, GLSL3, DoubleSide, BackSide, WebGLRenderTarget, HalfFloatType, FloatType, LinearFilter, LinearMipmapLinearFilter, NearestFilter, Color, Vector3, Matrix4, Matrix3, SphereGeometry, PlaneGeometry, PMREMGenerator, OrthographicCamera, NoBlending, AdditiveBlending, Vector4 } from "three";
 import { buildGearSpray } from "./clockwork.js";
 import { buildShatter, BURSTS } from "./shatter.js";
 import { buildLightScene, LIGHT_SCENES } from "./scenes.js";
@@ -370,6 +370,16 @@ float keyShadow(vec3 p) {
 }
 `;
 
+// The scene placed about the plate: held shallow round it, as display holograms are (far in front or behind it
+// everything would blur away), and sheared by depth for a band.
+const SHEAR_VERTEX_PARS = "uniform vec3 uShear;\nuniform vec3 uPlateP;\nuniform vec3 uPlateN;\nuniform float uDepthKeep;\n";
+const SHEAR_PROJECT = `vec4 holoWorld = modelMatrix * vec4(transformed, 1.0);
+  float holoDepth = dot(holoWorld.xyz - uPlateP, uPlateN);
+  holoWorld.xyz -= uPlateN * holoDepth * (1.0 - uDepthKeep);
+  holoWorld.xyz += uShear * holoDepth * uDepthKeep;
+  vec4 mvPosition = viewMatrix * holoWorld;
+  gl_Position = projectionMatrix * mvPosition;`;
+
 // The recording material: baked diffuse light, live reflections occluded by the bake; output as the record or as one
 // band of the replay, sheared about the plate.
 function recordingMaterial(uniforms) {
@@ -377,7 +387,7 @@ function recordingMaterial(uniforms) {
   m.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     shader.vertexShader =
-      "uniform sampler2D bakeTex;\nuniform vec3 uShear;\nuniform vec3 uPlateP;\nuniform vec3 uPlateN;\nuniform float uDepthKeep;\nattribute vec3 surf;\nvarying vec3 vSurf;\nvarying vec3 vBake;\nvarying vec3 vLocal;\nvarying vec3 vLocalN;\n" +
+      SHEAR_VERTEX_PARS + "uniform sampler2D bakeTex;\nattribute vec3 surf;\nvarying vec3 vSurf;\nvarying vec3 vBake;\nvarying vec3 vLocal;\nvarying vec3 vLocalN;\n" +
       shader.vertexShader
         .replace(
           "#include <begin_vertex>",
@@ -387,18 +397,9 @@ function recordingMaterial(uniforms) {
   vLocalN = normalize(objectNormal);
   vBake = texelFetch(bakeTex, ivec2(gl_VertexID % ${BAKE_WIDTH}, gl_VertexID / ${BAKE_WIDTH}), 0).rgb;`,
         )
-        .replace(
-          "#include <project_vertex>",
-          `vec4 holoWorld = modelMatrix * vec4(transformed, 1.0);
-  // Held shallow round the plate, as display holograms are: far in front or behind it everything would blur away.
-  float holoDepth = dot(holoWorld.xyz - uPlateP, uPlateN);
-  holoWorld.xyz -= uPlateN * holoDepth * (1.0 - uDepthKeep);
-  holoWorld.xyz += uShear * holoDepth * uDepthKeep;
-  vec4 mvPosition = viewMatrix * holoWorld;
-  gl_Position = projectionMatrix * mvPosition;`,
-        );
+        .replace("#include <project_vertex>", SHEAR_PROJECT);
     shader.fragmentShader =
-      "uniform float nearZ;\nuniform float span;\nuniform float windowId;\nuniform float uPass;\nuniform vec4 uChannel;\nuniform sampler2D uRecord;\nuniform vec2 uSize;\nuniform sampler2D uKeyShadow;\nuniform mat4 uKeyVP;\nuniform vec3 uKey;\nuniform float uKeyTexel;\nuniform float uKeyRange;\nvarying vec3 vSurf;\nvarying vec3 vBake;\nvarying vec3 vLocal;\nvarying vec3 vLocalN;\n" + KEY_SHADOW_GLSL +
+      "uniform float nearZ;\nuniform float span;\nuniform float windowId;\nuniform float uPass;\nuniform vec4 uChannel;\nuniform sampler2D uKeyShadow;\nuniform mat4 uKeyVP;\nuniform vec3 uKey;\nuniform float uKeyTexel;\nuniform float uKeyRange;\nvarying vec3 vSurf;\nvarying vec3 vBake;\nvarying vec3 vLocal;\nvarying vec3 vLocalN;\n" + KEY_SHADOW_GLSL +
       shader.fragmentShader
         .replace("#include <color_fragment>", "#include <color_fragment>\n  diffuseColor.rgb *= vSurf.z;")
         .replace("#include <roughnessmap_fragment>", "#include <roughnessmap_fragment>\n  roughnessFactor = vSurf.y;")
@@ -420,7 +421,7 @@ function recordingMaterial(uniforms) {
   float holoLum = dot(gl_FragColor.rgb, vec3(0.2126, 0.7152, 0.0722));
   float holoDepth = 0.1 + 0.9 * clamp(1.0 - (vViewPosition.z - nearZ) / span, 0.0, 1.0);
   if (uPass > 0.5) {
-    // Each band hides what is behind within itself (its own depth pass); the bands' images then add, as replayed light does.
+    // Each band is written into its own channel only (diorama.render masks the others), its nearest surface winning.
     gl_FragColor = uChannel * holoLum;
   } else gl_FragColor = vec4(holoLum, holoDepth, windowId, 1.0);`,
         );
@@ -431,30 +432,10 @@ function recordingMaterial(uniforms) {
 export function createDiorama(renderer, { shadowSize = 2048 } = {}) {
   const opts = { type: HalfFloatType, minFilter: LinearFilter, magFilter: LinearFilter, depthBuffer: true };
   const record = new WebGLRenderTarget(1, 1, opts);
-  // Mipmapped, for the ghostly halo's wide, soft reads.
+  // The bands, four to a buffer. Mipmapped, for the ghostly halo's wide, soft reads.
   const replays = [0, 1, 2].map(() => new WebGLRenderTarget(1, 1, { ...opts, generateMipmaps: true, minFilter: LinearMipmapLinearFilter }));
-  // This frame's bands, blended into replays (a running average over a few frames, each with its bands jittered
-  // differently, so the copies of the scene fill in between into a smooth smear).
-  const fresh = [0, 1, 2].map(() => new WebGLRenderTarget(1, 1, opts));
-  const blendMaterial = new ShaderMaterial({
-    glslVersion: GLSL3,
-    uniforms: { tex: { value: null }, keep: { value: 0 } },
-    vertexShader: "out vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
-    fragmentShader: "uniform sampler2D tex; uniform float keep; in vec2 vUv; out vec4 o; void main() { o = texture(tex, vUv) * (1.0 - keep); }",
-    blending: CustomBlending,
-    blendSrc: OneFactor,
-    blendDst: ConstantColorFactor,
-    blendSrcAlpha: OneFactor,
-    blendDstAlpha: ConstantAlphaFactor,
-    depthTest: false,
-    depthWrite: false,
-  });
-  const blendScene = new Scene();
-  const blendQuad = new Mesh(new PlaneGeometry(2, 2), blendMaterial);
-  blendQuad.frustumCulled = false;
-  blendScene.add(blendQuad);
-  const blendCamera = new OrthographicCamera();
-  let fresher = true;
+  // Renders nothing: drawn into a target, it has three build that target's mipmaps once.
+  const empty = new Scene();
   const bandStep = new Vector3();
   const uniforms = {
     nearZ: { value: 1 },
@@ -471,14 +452,12 @@ export function createDiorama(renderer, { shadowSize = 2048 } = {}) {
     uKey: { value: KEY.clone() },
     uKeyTexel: { value: 0.002 },
     uKeyRange: { value: 4 },
-    uRecord: { value: null },
     uDepthKeep: { value: 0.5 },
-    uSize: { value: [1, 1] },
   };
-  uniforms.uRecord.value = record.texture;
   const material = recordingMaterial(uniforms);
-  // The bands add up, each in its own channel (alpha included).
-  material.blendSrc = material.blendDst = material.blendSrcAlpha = material.blendDstAlpha = OneFactor;
+  material.blending = NoBlending;
+  const gl = renderer.getContext();
+  const colorState = renderer.state.buffers.color;
   const scene = new Scene();
   scene.environment = studioEnvironment(renderer);
   scene.environmentIntensity = 0.9;
@@ -537,7 +516,6 @@ export function createDiorama(renderer, { shadowSize = 2048 } = {}) {
     // Puts a prepared scene on show, freeing the one before.
     show(next) {
       if (!next) return;
-      fresher = true;
       content?.geometry.dispose();
       content?.bake.dispose();
       content?.shadow.target.dispose();
@@ -556,17 +534,14 @@ export function createDiorama(renderer, { shadowSize = 2048 } = {}) {
     setSize(w, h) {
       record.setSize(w, h);
       // The bands at half resolution: a quarter of the fill, and softer.
-      fresher = true;
-      for (const r of fresh) r.setSize(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
       for (const r of replays) r.setSize(Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2)));
-      uniforms.uSize.value = [Math.max(1, Math.round(w / 2)), Math.max(1, Math.round(h / 2))];
     },
     // Draws the record and the replay. views: { matrix (where the scene sits, world), radius (how big it may be),
     // planes (clip to a window, or null), id, plate: { p, n, up } (world), lambdaB, smear (the shear per unit of
     // lambda / lambdaB - 1, before disperse) }. bands: how many bands of the
     // replay, bandwidth (nm), disperse (shear per unit of lambda / lambdaB - 1), jitter (-0.5..0.5, per frame).
-    // near/span: the depth range to encode.
-    render(camera, { views, near, span, bands = 6, bandwidth = 35, disperse = 1, jitter = 0, historyKeep = 0 }) {
+    // near/span: the depth range to encode. Only the first ceil(bands / 4) replay buffers are written.
+    render(camera, { views, near, span, bands = 6, bandwidth = 35, disperse = 1, jitter = 0 }) {
       const prevTarget = renderer.getRenderTarget();
       const prevAlpha = renderer.getClearAlpha();
       const prevAutoClear = renderer.autoClear;
@@ -575,7 +550,9 @@ export function createDiorama(renderer, { shadowSize = 2048 } = {}) {
       renderer.autoClear = false;
       renderer.localClippingEnabled = true;
       const bandT = Array.from({ length: Math.min(12, bands) }, (_, k) => ((k + 0.5 + jitter) / Math.min(12, bands)) * 2 - 1);
-      for (const t of [record, ...fresh]) {
+      const used = replays.slice(0, Math.ceil(bandT.length / 4));
+      for (const t of [record, ...used]) {
+        if (t !== record) t.texture.generateMipmaps = false;
         renderer.setRenderTarget(t);
         renderer.clear();
       }
@@ -597,48 +574,35 @@ export function createDiorama(renderer, { shadowSize = 2048 } = {}) {
           const blur = Math.min(1.5, 1 / vn);
           _up.copy(view.smear ?? view.plate.up);
           bandStep.copy(_up).multiplyScalar(((2 / bandT.length) * 2 * bandwidth * disperse * blur) / view.lambdaB);
-          // The record (not reading itself while it's drawn: WebGL drops a draw that samples its own target).
-          material.blending = NoBlending;
-          material.depthWrite = true;
+          // The record.
           uniforms.uPass.value = 0;
-          uniforms.uRecord.value = null;
           uniforms.uShear.value.set(0, 0, 0);
           renderer.setRenderTarget(record);
           renderer.render(scene, camera);
           // The replay: the scene once per band of wavelength, sheared by how far the band is from the plate's centre,
-          // its brightness added into its own channel (four bands to a buffer); hologram.js colours each band per pixel.
-          material.blending = CustomBlending;
+          // its brightness written into its own channel (four bands to a buffer, the others masked off, so each band
+          // keeps just its nearest surfaces); hologram.js colours each band per pixel.
           uniforms.uPass.value = 1;
-          uniforms.uRecord.value = record.texture;
+          colorState.setMask(true);
           for (let k = 0; k < bandT.length; k++) {
-            renderer.setRenderTarget(fresh[k >> 2]);
+            renderer.setRenderTarget(replays[k >> 2]);
             uniforms.uChannel.value.set(k % 4 === 0 ? 1 : 0, k % 4 === 1 ? 1 : 0, k % 4 === 2 ? 1 : 0, k % 4 === 3 ? 1 : 0);
             uniforms.uShear.value.copy(_up).multiplyScalar(((bandT[k] * 2 * bandwidth) / view.lambdaB) * disperse * blur);
-            // Depth first, then brightness only where a surface is the nearest: added blindly, the hidden ones would show.
             renderer.clearDepth();
-            material.colorWrite = false;
-            material.depthWrite = true;
+            // Locked, so three keeps the channel mask through the draw.
+            gl.colorMask(k % 4 === 0, k % 4 === 1, k % 4 === 2, k % 4 === 3);
+            colorState.setLocked(true);
             renderer.render(scene, camera);
-            material.colorWrite = true;
-            material.depthWrite = false;
-            renderer.render(scene, camera);
+            colorState.setLocked(false);
+            gl.colorMask(true, true, true, true);
           }
         }
         material.clippingPlanes = null;
-        material.blending = NoBlending;
-        material.depthWrite = true;
       }
-      // Into the running average: keep of the history, the rest from this frame (all of it after a change of scene).
-      const keep = fresher ? 0 : historyKeep;
-      fresher = false;
-      blendMaterial.uniforms.keep.value = keep;
-      blendMaterial.blendColor.setRGB(keep, keep, keep);
-      blendMaterial.blendAlpha = keep;
-      for (let i = 0; i < 3; i++) {
-        blendMaterial.uniforms.tex.value = fresh[i].texture;
-        renderer.setRenderTarget(replays[i]);
-        if (keep === 0) renderer.clear();
-        renderer.render(blendScene, blendCamera);
+      for (const t of used) {
+        t.texture.generateMipmaps = true;
+        renderer.setRenderTarget(t);
+        renderer.render(empty, camera);
       }
       renderer.autoClear = prevAutoClear;
       renderer.setRenderTarget(prevTarget);

@@ -44,6 +44,7 @@ const defaults = {
   ghost: 0.25,
   graze: 0.8,
   wear: 0.85,
+  reflectLift: 4,
   sway: 1,
   orbit: 1,
   roll: 0.25,
@@ -72,9 +73,9 @@ const pipeline = new Pipeline(renderer, {
   saturation: 1.15,
   vignette: 0.3,
   grain: 0.02,
-  shadow: { autoFit: true, denoise: true },
   // The tunnel is all light and the card's frame lies in it: no AO, bounce light or cast shadows to show (their history
   // would lag behind the tunnel's streaming).
+  shadows: false,
   gi: false,
   composite: (hdr, info) => cardOver.composite(hdr, info),
 });
@@ -113,6 +114,7 @@ randomIn(gui.addSlider("Haze", params.haze, 0, 1, 0.01), params.haze, 0, 0.1, 0.
 gui.addSection("Glass");
 gui.addSlider("Wear", params.wear, 0, 1.5, 0.01);
 gui.addSlider("Fingerprints", params.fingerprints, 0, 2, 0.01);
+gui.addSlider("Reflection lift", params.reflectLift, 0, 10, 0.1, { randomizable: false });
 gui.addSection("Motion");
 gui.addSlider("Sway", params.sway, 0, 2, 0.01, { randomizable: false });
 gui.addSlider("Orbit", params.orbit, 0, 2, 0.01, { randomizable: false });
@@ -329,7 +331,7 @@ const diorama = createDiorama(renderer, { shadowSize: mobile ? 1024 : 2048 });
 // The window render's size, as a share of the screen's pixels.
 const PORTAL_SCALE = mobile ? 0.5 : 1;
 
-const u = createHologramUniforms({ portal: diorama.texture, replays: diorama.replayTextures, look: params.look() });
+const u = { ...createHologramUniforms({ portal: diorama.texture, replays: diorama.replayTextures, look: params.look() }), ...tunnel.uniforms };
 const hero = new Group();
 scene.add(hero);
 // One program per card (a trading card, a glass plate), both compiled up front so a flip never waits.
@@ -605,7 +607,6 @@ window.app = {
   // tools/perf times these as their own segments.
   perfSegments: (wrap) => {
     wrap(diorama, "render", "diorama");
-    wrap(tunnel.env, "update", "tunnelEnv");
   },
 };
 
@@ -738,6 +739,7 @@ render(({ time, dt }) => {
   u.uSmudgeAmount.value = params.fingerprints();
   u.uCardBorder.value = params.shape() === "glass" ? 0.012 : params.border();
   u.uWear.value = params.wear();
+  u.uReflectLift.value = params.reflectLift();
   u.uFrameBand.value = 0;
   u.uHoloGain.value = params.brightness();
 
@@ -785,6 +787,7 @@ render(({ time, dt }) => {
   // Screen units per unit of distance across the view, at unit depth.
   const tanHalf = Math.tan(MathUtils.degToRad(camera.fov) / 2);
   u.uProj.value.set(1 / (2 * tanHalf * camera.aspect), 1 / (2 * tanHalf));
+  u.tunnelPixelAngle.value = (2 * tanHalf) / u.uScreen.value.y;
   u.uLambda0.value = params.colour();
   u.uBandwidth.value = params.bandwidth();
   u.uSwelling.value = params.swelling();

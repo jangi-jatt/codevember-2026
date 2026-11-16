@@ -13,12 +13,15 @@ export function createCardOver(renderer, pipeline) {
   const out = new WebGLRenderTarget(1, 1, { type: HalfFloatType, depthBuffer: false });
   const material = new ShaderMaterial({
     glslVersion: GLSL3,
-    uniforms: { tBlurred: { value: null }, tSharp: { value: null }, tMask: { value: mask.texture }, sweep: { value: 0 }, axis: { value: new Vector3(0, 1, 0) }, centre: { value: new Vector3() }, normal: { value: new Vector3() }, viewProj: { value: new Matrix4() }, invViewProj: { value: new Matrix4() }, camPos: { value: new Vector3() } },
+    uniforms: { tBlurred: { value: null }, tSharp: { value: null }, tMask: { value: mask.texture }, sweep: { value: 0 }, taps: { value: 1 }, radius: { value: 1 }, axis: { value: new Vector3(0, 1, 0) }, centre: { value: new Vector3() }, normal: { value: new Vector3() }, viewProj: { value: new Matrix4() }, invViewProj: { value: new Matrix4() }, camPos: { value: new Vector3() } },
     vertexShader: "out vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }",
     fragmentShader: /* glsl */ `
       uniform sampler2D tBlurred, tSharp, tMask;
       // sweep: how far the card turns about axis (through its centre) during the shutter (radians).
       uniform float sweep;
+      // taps: samples across the shutter, about a pixel apart at the card's rim; radius: of the sphere the card turns in.
+      uniform int taps;
+      uniform float radius;
       uniform vec3 axis, centre, normal, camPos;
       uniform mat4 viewProj, invViewProj;
       in vec2 vUv;
@@ -27,9 +30,16 @@ export function createCardOver(renderer, pipeline) {
       void main() {
         vec4 card = vec4(0.0);
         float cover = 0.0;
-        int n = abs(sweep) < 1e-3 ? 1 : 16;
+        int n = taps;
         vec4 far = invViewProj * vec4(vUv * 2.0 - 1.0, 1.0, 1.0);
         vec3 dir = normalize(far.xyz / far.w - camPos);
+        // Turning about its centre, the card never leaves its sphere: rays that miss it see only the tunnel.
+        vec3 oc = camPos - centre;
+        float b = dot(oc, dir), c = dot(oc, oc) - radius * radius;
+        if (b * b < c || (b > 0.0 && c > 0.0)) {
+          o = texture(tBlurred, vUv);
+          return;
+        }
         for (int i = 0; i < n; i++) {
           // Where the card was at this moment of the shutter, which point of it this pixel saw, and where that point is
           // in the frame as rendered.
@@ -92,6 +102,13 @@ export function createCardOver(renderer, pipeline) {
       u.viewProj.value.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
       u.invViewProj.value.copy(u.viewProj.value).invert();
       u.camPos.value.setFromMatrixPosition(camera.matrixWorld);
+      const g = card.geometry;
+      if (!g.boundingSphere) g.computeBoundingSphere();
+      u.radius.value = (g.boundingSphere.center.length() + g.boundingSphere.radius) * card.matrixWorld.getMaxScaleOnAxis() * 1.02;
+      // The card's radius in pixels, at its distance.
+      const dist = Math.max(u.centre.value.distanceTo(u.camPos.value), 1e-3);
+      const rimPx = (u.radius.value * camera.projectionMatrix.elements[5] * height) / (2 * dist);
+      u.taps.value = Math.abs(this.sweep) < 1e-3 ? 1 : Math.min(16, Math.max(2, Math.ceil(Math.abs(this.sweep) * rimPx)));
       renderer.setRenderTarget(out);
       renderer.render(quadScene, quadCamera);
       renderer.setRenderTarget(prevTarget);

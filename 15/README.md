@@ -36,7 +36,8 @@ Notable:
   round, a lane's width along). With the music the plainest plays the
   opening 12 s, then the style follows how hectic the song is (batec's curve, spread over the song's own range), holding
   each for at least 4 bars, and as it gets more hectic the light-speed streaks and then the dot spiral layer on top; without it, a new style every 140 m. The glass and foil reflect the tunnel as it is:
-  rendered round the card into a cube each frame and prefiltered; each style's ambient light is baked once.
+  each pixel traces its reflection to the tube and draws the wall there (lifted on the dark glass, so its dim fill and
+  lit tiles still show); each style's ambient light is baked once.
 - Day 2's burst is built a slice a frame too (its `peelPiecesAsync`), and its shapes are built while the page loads.
 - Each card is its own program, both compiled at load. Loop bounds are uniforms so D3D can't unroll the marches and
   light loops (as one program it compiled for over ten seconds and lost the WebGL context on Windows).

@@ -2,8 +2,7 @@
 // the further down it) and slowly rolls, its wall in a run of neon styles, one a section. Toward each section's end the
 // next one comes in over it piece by piece, and the tube's shape blends into the next one's. Its live image is what the
 // glass and foil reflect.
-import { Mesh, Scene, CylinderGeometry, ShaderMaterial, BackSide, PMREMGenerator, Vector3, Color, GLSL3, WebGLCubeRenderTarget, CubeCamera, HalfFloatType } from "three";
-import { globalUniforms } from "modules/pipeline/uniforms.js";
+import { Mesh, Scene, CylinderGeometry, ShaderMaterial, BackSide, PMREMGenerator, Vector3, Color, GLSL3 } from "three";
 import { PipelineMaterial } from "modules/pipeline/PipelineMaterial.js";
 import { applyEnvironment, computeSH } from "modules/pipeline/studio.js";
 
@@ -141,7 +140,7 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     // A few panels glow from behind, fading in and out.
     float panel = smoothstep(0.75, 1.0, tHash(id + 5.7)) * (0.5 + 0.5 * sin(tunnelBeats * 1.5707963 + h * 40.0));
     col += mix(vec3(0.25, 0.1, 0.8), vec3(0.8, 0.2, 0.9), tHash(id + 1.9)) * panel * 0.12 * smoothstep(0.5, 0.3, max(abs(f.x), abs(f.y)));
-    if (h < 0.06 && blur == 0.0) {
+    if (h < 0.06 && blur < 0.05) {
       vec2 o = (vec2(tHash(id + 7.3), tHash(id + 9.1)) - 0.5) * 0.6;
       float flicker = 0.6 + 0.4 * sin(tunnelTime * 9.0 + h * 600.0) + 1.2 * tunnelHat;
       col += vec3(1.0, 0.45, 0.1) * exp(-dot(f - o, f - o) / 0.004) * 6.0 * flicker;
@@ -399,6 +398,43 @@ vec3 displace(vec3 p, inout vec3 n) {
 }
 `;
 
+// The tunnel as a glossy surface reflects it: the reflected ray met with the tube (its bend followed in a few steps)
+// and the wall drawn there, widened by the surface's roughness. pixelAngle: a screen pixel's angular size.
+export const TUNNEL_TRACE_GLSL = /* glsl */ `
+uniform float tunnelTravel;
+uniform float tunnelBend;
+uniform float tunnelTime;
+uniform float tunnelPixelAngle;
+${wall}
+vec2 tCurveT(float s) {
+  return vec2(sin(s * 0.021) + 0.6 * sin(s * 0.037 + 2.0), 0.8 * sin(s * 0.017 + 1.0) + 0.4 * sin(s * 0.043)) * 18.0;
+}
+vec2 tSlopeT(float s) {
+  return vec2(0.021 * cos(s * 0.021) + 0.0222 * cos(s * 0.037 + 2.0), 0.0136 * cos(s * 0.017 + 1.0) + 0.0172 * cos(s * 0.043)) * 18.0;
+}
+vec2 tOffset(float d) {
+  return (tCurveT(tunnelTravel + d) - tCurveT(tunnelTravel) - tSlopeT(tunnelTravel) * d) * tunnelBend;
+}
+vec3 traceTunnel(vec3 P, vec3 R, float rough) {
+  vec2 off = vec2(0.0);
+  float t = 1e3;
+  float A = dot(R.xy, R.xy);
+  for (int i = 0; i < 3; i++) {
+    vec2 o = P.xy - off;
+    float B = dot(o, R.xy), C = dot(o, o) - RADIUS_T * RADIUS_T;
+    t = A > 1e-6 ? (-B + sqrt(max(B * B - A * C, 0.0))) / A : 1e3;
+    off = tOffset(-(P.z + R.z * t));
+  }
+  vec3 H = P + R * t;
+  vec2 q = H.xy - off;
+  // A pixel's footprint there, stretched along the tube where the ray meets the wall at a glance.
+  float w = t * tunnelPixelAngle;
+  float across = abs(dot(R.xy, normalize(q)));
+  float blur = t * rough * rough * 1.5;
+  return tunnelBlendAt(atan(q.y, q.x), tunnelTravel - H.z, -H.z, blur, w / RADIUS_T, w / max(across, 0.05)) * tunnelLight;
+}
+`;
+
 function tube(radial, rings) {
   const geometry = new CylinderGeometry(RADIUS, RADIUS, NEAR - FAR, radial, rings, true);
   geometry.rotateX(Math.PI / 2);
@@ -433,6 +469,7 @@ export function createTunnel(renderer) {
     tunnelWaveS: { value: -1e4 },
     tunnelWaveAmp: { value: 0 },
     tunnelBlurLen: { value: 0 },
+    tunnelPixelAngle: { value: 0.001 },
   };
   const material = new PipelineMaterial({
     color: 0x000000,
@@ -457,7 +494,7 @@ export function createTunnel(renderer) {
   mesh.userData.noWireframe = true;
   mesh.frustumCulled = false;
 
-  const env = createEnvironmentBaker(renderer, uniforms);
+  const env = createEnvironmentBaker(renderer);
   let envStyle = -1;
   return {
     mesh,
@@ -489,7 +526,6 @@ export function createTunnel(renderer) {
       // The ambient light follows the style round the card.
       const here = u.tunnelTravel.value > u.tunnelGate.value + BLEND / 2 ? u.tunnelTo.value : u.tunnelFrom.value;
       if (here !== envStyle) env.bake((envStyle = here));
-      env.update();
     },
     // Bakes every style's ambient light, a frame apart, so a change of style never waits on one.
     async prebake(yieldFrame) {
@@ -533,9 +569,9 @@ export function createTunnel(renderer) {
   };
 }
 
-// The tunnel as the environment. Ambient light: each style's, baked once, straight and still. Reflections: the tunnel
-// itself as it moves and bends, rendered round the card into a cube each frame and prefiltered.
-function createEnvironmentBaker(renderer, live) {
+// The tunnel as the environment's ambient light: each style's, baked once, straight and still. (Reflections are traced:
+// TUNNEL_TRACE_GLSL.)
+function createEnvironmentBaker(renderer) {
   const scene = new Scene();
   const material = new ShaderMaterial({
     glslVersion: GLSL3,
@@ -548,19 +584,6 @@ function createEnvironmentBaker(renderer, live) {
   const pmrem = new PMREMGenerator(renderer);
   const baked = new Map();
 
-  const liveScene = new Scene();
-  const liveMaterial = new ShaderMaterial({
-    glslVersion: GLSL3,
-    side: BackSide,
-    uniforms: live,
-    vertexShader: `out vec3 vTube;\n${bend}\nvoid main() { vec3 n = normal; vTube = vec3(position.xy, tunnelTravel - position.z); gl_Position = projectionMatrix * modelViewMatrix * vec4(displace(position, n), 1.0); }`,
-    fragmentShader: `uniform float tunnelTravel; uniform float tunnelTime; in vec3 vTube; out vec4 o;\n${wall}\nvoid main() { o = vec4(tunnelBlend(atan(vTube.y, vTube.x), vTube.z, vTube.z - tunnelTravel, 0.03) * tunnelLight, 1.0); }`,
-  });
-  liveScene.add(new Mesh(tube(96, 260), liveMaterial));
-  const cube = new WebGLCubeRenderTarget(128, { type: HalfFloatType });
-  const cubeCamera = new CubeCamera(0.1, 600, cube);
-  const livePmrem = new PMREMGenerator(renderer);
-  let liveTarget = null;
   return {
     // The style's ambient light and key.
     bake(style) {
@@ -577,14 +600,6 @@ function createEnvironmentBaker(renderer, live) {
         });
       }
       applyEnvironment(baked.get(style));
-      if (liveTarget) globalUniforms.envMap.value = liveTarget.texture;
-    },
-    // This frame's reflections.
-    update() {
-      cubeCamera.update(renderer, liveScene);
-      liveTarget = livePmrem.fromCubemap(cube.texture, liveTarget);
-      globalUniforms.envMap.value = liveTarget.texture;
-      globalUniforms.envMapMaxLod.value = Math.max((liveTarget.texture.mipmaps?.length ?? 1) - 1, 0);
     },
   };
 }

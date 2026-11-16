@@ -4,6 +4,7 @@
 // Each chamber holds a 3D scene (diorama.js: clockwork or a burst) in a bowl of rings.
 import { Color, Matrix3, Vector2, Vector3 } from "three";
 import { PipelineMaterial } from "modules/pipeline/PipelineMaterial.js";
+import { TUNNEL_TRACE_GLSL } from "./tunnel.js";
 
 export const LOOK_PRESETS = {
   spectrum: {
@@ -207,6 +208,8 @@ const fragmentPars = /* glsl */ `
   vec2 holoScreenShift = vec2(0.0);
   vec3 holoNormal = vec3(0.0, 0.0, 1.0);
   float holoGrazeNow = 0.0;
+  // Metal reflects in full and needs no lift (set in surface()).
+  float holoMetal = 0.0;
 
   // The scene's buffer at uv; in Faces mode only this face's own copy (its window id, read unfiltered).
   vec4 samplePortal(vec2 uv) {
@@ -301,8 +304,9 @@ const fragmentPars = /* glsl */ `
       float w = 1.0 - abs(x);
       vec2 at = uv + du * x;
       b0 += textureLod(uReplay0, at, 0.0) * w;
-      b1 += textureLod(uReplay1, at, 0.0) * w;
-      b2 += textureLod(uReplay2, at, 0.0) * w;
+      // Only the buffers holding bands (four to each).
+      if (uBandCount > 4) b1 += textureLod(uReplay1, at, 0.0) * w;
+      if (uBandCount > 8) b2 += textureLod(uReplay2, at, 0.0) * w;
       wsum += w;
     }
     b0 /= wsum;
@@ -508,8 +512,9 @@ const fragmentPars = /* glsl */ `
         for (int k = 0; k < 8 * uOne; k++) {
           float a = float(k) * 0.785398;
           vec2 at = suv + vec2(cos(a), sin(a)) * px * 22.0;
-          vec4 b0 = textureLod(uReplay0, at, 3.0), b1 = textureLod(uReplay1, at, 3.0);
-          halo += (dot(b0, vec4(1.0)) + dot(b1, vec4(1.0))) / max(float(uBandCount), 1.0) * 1.65;
+          float b = dot(textureLod(uReplay0, at, 3.0), vec4(1.0));
+          if (uBandCount > 4) b += dot(textureLod(uReplay1, at, 3.0), vec4(1.0));
+          halo += b / max(float(uBandCount), 1.0) * 1.65;
         }
         vec3 hue = spectral(lambdaB) / max(dot(spectral(lambdaB), vec3(0.2126, 0.7152, 0.0722)), 1e-3);
         replay += hue * halo * (0.045 * uGhost);
@@ -1106,9 +1111,22 @@ void surface(inout Surface s) {
     s.roughness = clamp(0.02 + scuff, 0.02, 1.0);
     s.specular = vFaceP.x < 0.5 ? 1.6 : uPlateReflection / 0.3;
 #endif
+    holoMetal = s.metalness;
 #endif
 }
 
+`;
+
+// The tunnel in the glass, its range compressed: through a few percent of reflection the walls' dim fill and lit tiles
+// would vanish while their bright lines still clip, so the dim parts are lifted more than the bright ones.
+const traceReflection = /* glsl */ `
+uniform float uReflectLift;
+vec4 traceReflection(vec3 P, vec3 R, float rough) {
+  vec3 c = traceTunnel(P, R, rough);
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float lift = uReflectLift * (1.0 - holoMetal);
+  return vec4(c * (1.0 + lift) / (1.0 + lift * l * 0.5), 1.0);
+}
 `;
 
 // The uniforms every variant shares.
@@ -1196,6 +1214,7 @@ export function createHologramUniforms({ portal, replays, look = "spectrum" } = 
     uFoil: { value: 1 },
     uSmudge: { value: null },
     uSmudgeAmount: { value: 1 },
+    uReflectLift: { value: 0 },
   };
 }
 
@@ -1208,7 +1227,9 @@ export function createHologramMaterial(uniforms, { mode = 0, card = 0 } = {}) {
     vertexPars,
     vertexMain,
     varyings,
-    fragmentPars,
+    // The glass and foil reflect the tunnel round them, traced per pixel.
+    fragmentPars: fragmentPars + TUNNEL_TRACE_GLSL + traceReflection,
+    reflections: true,
     surface,
     uniforms,
     defines: { HOLO_MODE: card ? 1 : mode, HOLO_CARD: card ? 1 : 0, HOLO_CARD_STYLE: card },
