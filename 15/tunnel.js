@@ -77,10 +77,17 @@ float tNeon(float r, float width, float w) {
   // A crisp, bright core only: the glow round it is the bloom's.
   return (1.0 - smoothstep(width, width + w, r)) * 4.0;
 }
+// A line across the tube (r: distance to it along the tube, in the line's units) as it streams past for mv of travel:
+// smeared into a band mv longer and dimmer, its light kept; 0..1. With mv 0 it is the still line's edge.
+float tBand(float r, float width, float w, float mv) {
+  float fade = min(2.0 * width + w, mv + w) / (mv + w);
+  return fade * (1.0 - smoothstep(abs(width - 0.5 * mv), width + 0.5 * mv + w, r));
+}
 
 // Emission of the wall in one style at angle a, s metres down the tunnel, d ahead of the card; blur widens lines (for
 // the environment's blurred bake); da, ds: screen widths of a radian and a metre.
-vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, float ds) {
+// mv: how far the wall travels during the shutter (0: still), smearing the lines across the tube.
+vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, float ds, float mv) {
   vec3 col = vec3(0.0);
   if (style == 0.0) {
     // Rounded square tiles in bands of colour, a few dark.
@@ -113,10 +120,10 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     // Every fourth ring flashes on each beat, the lit set moving down the tunnel beat by beat.
     float hit = mod(k - floor(tunnelBeats), 4.0) < 0.5 ? smoothstep(0.0, 0.08, fract(tunnelBeats)) * exp(-fract(tunnelBeats) * 3.0) : 0.0;
     float beat = 0.45 + 0.9 * hit;
-    col = ring * mix(tNeon(r, 0.035, w), 0.5, smoothstep(0.6, 2.0, w)) * beat;
+    col = ring * mix(4.0 * tBand(r, 0.035, w, mv), 0.5, smoothstep(0.6, 2.0, w)) * beat;
     // Fine rings between, and four light strips along the tube.
     float rFine = abs(fract(s / UNIT + 0.5) - 0.5) * UNIT;
-    col += ring.bgr * mix(tNeon(rFine, 0.008, w), 0.15, smoothstep(0.2, 0.6, w)) * 0.12;
+    col += ring.bgr * mix(4.0 * tBand(rFine, 0.008, w, mv), 0.15, smoothstep(0.2, 0.6, w)) * 0.12;
     float strip = abs(fract(a / 6.2831853 * 4.0 + 0.5) - 0.5) * 6.0 * UNIT;
     col += vec3(0.6, 0.3, 1.0) * mix(tNeon(strip, 0.02, da * 3.2 + blur), 0.1, smoothstep(0.3, 0.8, da * 3.2 + blur)) * 0.35;
     float floorBand = smoothstep(-0.6, -0.95, sin(a));
@@ -129,12 +136,13 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     vec2 f = fract(uv) - 0.5;
     vec2 id = vec2(mod(floor(uv.x), 24.0), floor(uv.y));
     float w = ds + blur;
-    float rLine = min(0.5 - abs(f.x), 0.5 - abs(f.y)) * 1.1;
-    col = vec3(0.45, 0.2, 1.0) * mix(tNeon(rLine, 0.012, w), 0.15, smoothstep(0.2, 0.6, w)) * 0.35;
+    // The frames: lines along the tube, and across it (smeared as it streams).
+    float frame = max(1.0 - smoothstep(0.012, 0.012 + w, (0.5 - abs(f.x)) * 1.1), tBand((0.5 - abs(f.y)) * 1.1, 0.012, w, mv / UNIT * 1.1));
+    col = vec3(0.45, 0.2, 1.0) * mix(4.0 * frame, 0.15, smoothstep(0.2, 0.6, w)) * 0.35;
     float g = s / (12.0 * UNIT);
     float gate = floor(g + 0.5);
     float rGate = abs(fract(g + 0.5) - 0.5) * 12.0 * UNIT;
-    col += (mod(gate, 2.0) < 1.0 ? vec3(0.9, 0.25, 1.0) : vec3(0.3, 0.45, 1.0)) * mix(tNeon(rGate, 0.07, w), 0.6, smoothstep(0.6, 2.0, w));
+    col += (mod(gate, 2.0) < 1.0 ? vec3(0.9, 0.25, 1.0) : vec3(0.3, 0.45, 1.0)) * mix(4.0 * tBand(rGate, 0.07, w, mv), 0.6, smoothstep(0.6, 2.0, w));
     col += vec3(0.006, 0.003, 0.018);
     float h = tHash(id + 3.1);
     // A few panels glow from behind, fading in and out.
@@ -143,7 +151,10 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     if (h < 0.06 && blur < 0.05) {
       vec2 o = (vec2(tHash(id + 7.3), tHash(id + 9.1)) - 0.5) * 0.6;
       float flicker = 0.6 + 0.4 * sin(tunnelTime * 9.0 + h * 600.0) + 1.2 * tunnelHat;
-      col += vec3(1.0, 0.45, 0.1) * exp(-dot(f - o, f - o) / 0.004) * 6.0 * flicker;
+      // A soft spot, stretched along the tube as it streams (a box over mv widens its variance by mv^2 / 12).
+      float vy = 0.002 + (mv / UNIT) * (mv / UNIT) / 12.0;
+      vec2 e = f - o;
+      col += vec3(1.0, 0.45, 0.1) * exp(-e.x * e.x / 0.004 - e.y * e.y / (2.0 * vy)) * sqrt(0.002 / vy) * 6.0 * flicker;
     }
   } else if (style == 4.0) {
     // Laser lanes: a thin line down every other lane over a near-black wall, beams of light racing along them on the
@@ -158,9 +169,12 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     // Beams: one per lane every 8 units, moving a unit a beat toward the card, staggered by lane.
     float b = fract((s + tunnelBeats * UNIT * 2.0) / (8.0 * UNIT) + h);
     float beam = smoothstep(0.0, 0.02, b) * pow(1.0 - b, 6.0);
+    // Streaming, averaged over the shutter's travel (the tail's integral; the head's short rise left out).
+    float db = 0.5 * mv / (8.0 * UNIT);
+    if (db > 1e-4) beam = (pow(1.0 - max(b - db, 0.0), 7.0) - pow(1.0 - min(b + db, 1.0), 7.0)) / (14.0 * db);
     col = tint * mix(tNeon(rl, 0.004, w), 0.05, smoothstep(0.05, 0.2, w)) * on * (0.25 + 2.5 * beam);
     float rr = abs(fract(s / (8.0 * UNIT) + 0.5) - 0.5) * 8.0 * UNIT;
-    col += vec3(0.5, 0.2, 1.0) * mix(tNeon(rr, 0.006, ds + blur), 0.03, smoothstep(0.1, 0.4, ds + blur)) * 0.25;
+    col += vec3(0.5, 0.2, 1.0) * mix(4.0 * tBand(rr, 0.006, ds + blur, mv), 0.03, smoothstep(0.1, 0.4, ds + blur)) * 0.25;
     col += vec3(0.004, 0.002, 0.012);
   } else if (style == 5.0) {
     // Memphis: 80s shapes scattered one to each 3 x 3 block of cells over a faint grid: gradient discs, pink triangles,
@@ -266,11 +280,12 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     vec2 uv = vec2(a / 6.2831853 * LANES, s / UNIT);
     vec2 dd = min(fract(uv), 1.0 - fract(uv));
     float w = max(da / 6.2831853 * LANES, ds / UNIT) + blur * 0.3;
-    float lines = max(1.0 - smoothstep(0.012, 0.012 + 1.5 * w, dd.x), 1.0 - smoothstep(0.02, 0.02 + 1.5 * w, dd.y));
+    float across = tBand(dd.y, 0.02, 1.5 * w, mv / UNIT);
+    float lines = max(1.0 - smoothstep(0.012, 0.012 + 1.5 * w, dd.x), across);
     lines = mix(lines, 0.06, smoothstep(0.25, 0.7, w));
     vec3 tint = mix(vec3(1.0, 0.1, 0.65), vec3(0.1, 0.85, 1.0), 0.5 + 0.5 * sin(a * 2.0 + s * 0.03));
     // Every fourth ring a bright one, and a scan of light sweeping round the tube.
-    float major = 1.0 + 1.5 * step(mod(floor(uv.y + 0.5), 4.0), 0.5) * (1.0 - smoothstep(0.02, 0.02 + 1.5 * w, dd.y));
+    float major = 1.0 + 1.5 * step(mod(floor(uv.y + 0.5), 4.0), 0.5) * across;
     // The scan goes round once a bar.
     float sweep = pow(0.5 + 0.5 * cos(a - tunnelBeats * 1.5707963 + s * 0.05), 12.0);
     col = tint * lines * (1.6 + 2.4 * sweep) * major + vec3(0.012, 0.0, 0.025) + tint * sweep * 0.05;
@@ -309,28 +324,30 @@ vec3 tStreaks(float a, float s, float da, float blur) {
 
 // A dot spiral (an overlay on any style): rings of glowing points, each ring turned a little more than the last, the
 // whole spiral turning as it comes.
-vec3 tDots(float a, float s, float da, float ds, float blur) {
+vec3 tDots(float a, float s, float da, float ds, float blur, float mv) {
   float spacing = 1.1;
   float v = s / spacing;
   float k = floor(v + 0.5);
   float dv = (fract(v + 0.5) - 0.5) * spacing;
   float u = (a + k * 0.21 + tunnelTime * 0.5) / 6.2831853 * LANES;
   float du = (fract(u) - 0.5) * UNIT;
-  float r = length(vec2(du, dv));
+  // Streaming, each dot smears into a dash mv long, its light kept.
+  float r = length(vec2(du, max(abs(dv) - 0.5 * mv, 0.0)));
   float w = max(ds, da * RADIUS_T) + blur;
   vec3 tint = 0.5 + 0.5 * cos(6.2831853 * (k * 0.045 + vec3(0.0, 0.33, 0.67)));
   tint = mix(tint, vec3(1.0, 0.15, 0.7), 0.35);
   float twinkle = 0.6 + 0.4 * sin(tunnelBeats * 3.1415927 + k * 0.9 + floor(u) * 2.4) + tunnelHat;
-  return tint * mix(tNeon(r, 0.04, w), 0.15, smoothstep(0.15, 0.45, w)) * twinkle;
+  float fade = (0.08 + w) / (mv + 0.08 + w);
+  return tint * mix(tNeon(r, 0.04, w) * fade, 0.15, smoothstep(0.15, 0.45, w)) * twinkle;
 }
 
 // The wall at raw angle a (atan's): the section's style, rolled, with the next one coming in over it block by block.
-vec3 tunnelBlendAt(float a, float s, float d, float blur, float da, float ds) {
+vec3 tunnelBlendAt(float a, float s, float d, float blur, float da, float ds, float mv) {
   vec3 st = tStyles(s);
   float ar = a + tRoll(s);
-  vec3 col = tunnelWall(st.x, ar, s, d, blur, da, ds);
+  vec3 col = tunnelWall(st.x, ar, s, d, blur, da, ds, mv);
   if (st.z > 0.0) {
-    vec3 next = tunnelWall(st.y, ar, s, d, blur, da, ds);
+    vec3 next = tunnelWall(st.y, ar, s, d, blur, da, ds, mv);
     // The next style replaces the old one tile by tile on the shared lattice: each cell switches whole, in an ordered
     // dither (a 4 x 4 Bayer order, roughened per cell), and flares a moment as it comes in.
     vec2 cell = vec2(mod(floor(ar / 6.2831853 * LANES), LANES), floor(s / UNIT));
@@ -344,31 +361,45 @@ vec3 tunnelBlendAt(float a, float s, float d, float blur, float da, float ds) {
   }
   // The cells answer the music: a scatter of them flashes on each kick, fewer sparkle on the hats.
   vec2 cell = vec2(mod(floor(ar / 6.2831853 * LANES), LANES), floor(s / UNIT));
-  float kickHit = step(tHash(cell + tunnelKickN * 1.371), 0.16) * tunnelKick;
-  float hatHit = step(tHash(cell * 1.31 + tunnelHatN * 2.113), 0.05) * tunnelHat;
-  col *= 1.0 + 3.0 * kickHit + 2.0 * hatHit;
+  // Streaming, a cell's flash spills into its neighbours along the tube by how much of the travel crosses into them.
+  float hw = 0.5 * mv / UNIT, fy = fract(s / UNIT);
+  float wPrev = hw > 0.0 ? clamp((hw - fy) / (2.0 * hw), 0.0, 1.0) : 0.0;
+  float wNext = hw > 0.0 ? clamp((hw - 1.0 + fy) / (2.0 * hw), 0.0, 1.0) : 0.0;
+  float hits = 0.0;
+  for (int j = -1; j <= 1; j++) {
+    float wj = j == 0 ? 1.0 - wPrev - wNext : j < 0 ? wPrev : wNext;
+    if (wj <= 0.0) continue;
+    vec2 c = cell + vec2(0.0, float(j));
+    hits += wj * (3.0 * step(tHash(c + tunnelKickN * 1.371), 0.16) * tunnelKick + 2.0 * step(tHash(c * 1.31 + tunnelHatN * 2.113), 0.05) * tunnelHat);
+  }
+  col *= 1.0 + hits;
   float far = exp(-abs(d) / 45.0);
   if (tunnelStreaks > 0.001) col += tStreaks(ar, s, da, blur) * tunnelStreaks * far;
-  if (tunnelDots > 0.001) col += tDots(ar, s, da, ds, blur) * tunnelDots * far;
+  if (tunnelDots > 0.001) col += tDots(ar, s, da, ds, blur, mv) * tunnelDots * far;
   return col;
 }
 
 vec3 tunnelBlend(float a, float s, float d, float blur) {
   // Derivatives before any branch, and from the raw angle so its wrap is handled once.
-  return tunnelBlendAt(a, s, d, blur, tAngleWidth(a), fwidth(s));
+  return tunnelBlendAt(a, s, d, blur, tAngleWidth(a), fwidth(s), 0.0);
 }
 
-// The wall as a camera sees it while it streams past for a shutter: averaged over the len metres it travels then, with
-// as many taps as that spans pixels (a third), up to 10.
+// The styles drawn as shapes (tiles, Memphis, suns), which the streaming can't smear in closed form.
+bool tTapped(float style) { return style == 0.0 || style == 5.0 || style == 6.0; }
+
+// The wall as a camera sees it while it streams past for a shutter, over the len metres it travels then: its lines
+// smeared in closed form, or for the shape styles averaged with as many taps as that spans pixels (a third), up to 10.
 vec3 tunnelBlendMoving(float a, float s, float d, float len) {
   float da = tAngleWidth(a);
   float ds = fwidth(s);
+  vec3 st = tStyles(s);
+  if (!tTapped(st.x) && !(st.z > 0.0 && tTapped(st.y))) return tunnelBlendAt(a, s, d, 0.0, da, ds, len);
   int n = int(clamp(ceil(len / max(ds, 1e-5) / 3.0), 1.0, 10.0));
   vec3 col = vec3(0.0);
   for (int i = 0; i < 10; i++) {
     if (i >= n) break;
     float o = n == 1 ? 0.0 : len * ((float(i) + 0.5) / float(n) - 0.5);
-    col += tunnelBlendAt(a, s + o, d + o, 0.0, da, ds);
+    col += tunnelBlendAt(a, s + o, d + o, 0.0, da, ds, 0.0);
   }
   return col / float(n);
 }
@@ -431,7 +462,7 @@ vec3 traceTunnel(vec3 P, vec3 R, float rough) {
   float w = t * tunnelPixelAngle;
   float across = abs(dot(R.xy, normalize(q)));
   float blur = t * rough * rough * 1.5;
-  return tunnelBlendAt(atan(q.y, q.x), tunnelTravel - H.z, -H.z, blur, w / RADIUS_T, w / max(across, 0.05)) * tunnelLight;
+  return tunnelBlendAt(atan(q.y, q.x), tunnelTravel - H.z, -H.z, blur, w / RADIUS_T, w / max(across, 0.05), 0.0) * tunnelLight;
 }
 `;
 
@@ -578,7 +609,7 @@ function createEnvironmentBaker(renderer) {
     side: BackSide,
     uniforms: { uStyle: { value: 0 }, tunnelTime: { value: 0 } },
     vertexShader: `uniform float uStyle; uniform float tunnelTime; out vec3 vP;\n${section}\nvoid main() { vP = position; vec3 p = position; p.xy *= tSection(uStyle, atan(p.y, p.x)); gl_Position = projectionMatrix * modelViewMatrix * vec4(p, 1.0); }`,
-    fragmentShader: `uniform float uStyle; uniform float tunnelTime; in vec3 vP; out vec4 o;\n${wall}\nvoid main() { float a = atan(vP.y, vP.x); o = vec4(tunnelWall(uStyle, a, -vP.z, -vP.z, 0.08, tAngleWidth(a), fwidth(vP.z)), 1.0); }`,
+    fragmentShader: `uniform float uStyle; uniform float tunnelTime; in vec3 vP; out vec4 o;\n${wall}\nvoid main() { float a = atan(vP.y, vP.x); o = vec4(tunnelWall(uStyle, a, -vP.z, -vP.z, 0.08, tAngleWidth(a), fwidth(vP.z), 0.0), 1.0); }`,
   });
   scene.add(new Mesh(tube(96, 120), material));
   const pmrem = new PMREMGenerator(renderer);
