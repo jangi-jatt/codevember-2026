@@ -6,12 +6,13 @@ import { suzanneGeometry } from "modules/suzanne/suzanneMesh.js";
 // normals. `depth` is how far inside the surface there is room for filling; `thin` marks shapes with
 // parts thinner than a shell (Suzanne's ears).
 
-function sphere() {
-  return mergeVertices(new IcosahedronGeometry(1, 40));
+// detail scales the tessellation (1: day 2's).
+function sphere(detail = 1) {
+  return mergeVertices(new IcosahedronGeometry(1, Math.round(40 * detail)));
 }
 
-function torus() {
-  return mergeVertices(new TorusGeometry(0.7, 0.32, 96, 200).deleteAttribute("uv"));
+function torus(detail = 1) {
+  return mergeVertices(new TorusGeometry(0.7, 0.32, Math.round(96 * detail), Math.round(200 * detail)).deleteAttribute("uv"));
 }
 
 // A subdivided cube pushed onto a rounded box: each point is its nearest point on the inner box
@@ -89,8 +90,8 @@ async function suzanne() {
 }
 
 const SHAPES = {
-  sphere: { build: sphere, depth: 0.75 },
-  torus: { build: torus, depth: 0.22 },
+  sphere: { build: sphere, depth: 0.75, detail: true },
+  torus: { build: torus, depth: 0.22, detail: true },
   "rounded cube": { build: roundedCube, depth: 0.55 },
   icosahedron: { build: icosahedron, depth: 0.65 },
   dodecahedron: { build: dodecahedron, depth: 0.7 },
@@ -99,11 +100,13 @@ const SHAPES = {
 
 const cache = new Map();
 
-// The shape's surface: positions, normals, triangles and an area-weighted sampler.
-async function loadShape(name) {
-  if (cache.has(name)) return cache.get(name);
+// The shape's surface: positions, normals, triangles and an area-weighted sampler. detail (opt-in) scales the sphere's
+// and the torus's tessellation; the others ignore it.
+async function loadShape(name, { detail = 1 } = {}) {
+  const key = detail === 1 ? name : `${name}|${detail}`;
+  if (cache.has(key)) return cache.get(key);
   const shape = SHAPES[name];
-  const geometry = await shape.build();
+  const geometry = await (shape.detail ? shape.build(detail) : shape.build());
   if (!geometry.attributes.normal) geometry.computeVertexNormals();
   const position = geometry.attributes.position.array;
   const normal = geometry.attributes.normal.array;
@@ -140,7 +143,7 @@ async function loadShape(name) {
   };
   const room = shape.thin ? roomInside(position, normal) : new Float32Array(position.length / 3).fill(1e3);
   const result = { name, geometry, position, normal, index, room, depth: shape.depth, sample };
-  cache.set(name, result);
+  cache.set(key, result);
   return result;
 }
 

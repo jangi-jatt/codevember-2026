@@ -8,6 +8,7 @@ import { SHAPE_LIST, buildSurfaceGeometry } from "./geometries.js";
 import { LOOK_PRESETS, createHologramUniforms, createHologramMaterial } from "./hologram.js";
 import { createDiorama, SCENES, braggReplay } from "./diorama.js";
 import { preloadShatterForms } from "./shatter.js";
+import { preloadLightScenes } from "./scenes.js";
 import { loadFingerprints, createSmudges } from "./smudge.js";
 import { createTunnel, TUNNEL_BY_INTENSITY } from "./tunnel.js";
 import { createCardOver } from "./cardOver.js";
@@ -285,8 +286,8 @@ function updateBeat(dt) {
   const k = (rate) => Math.exp(-rate * dt);
   const t = music.audible ? music.time : -1;
   if (beat.track && t >= 0) {
-    // The track loops: a jump back is a seek, not a run of events.
-    if (t < beat.last) {
+    // The track loops: a jump back is a seek, not a run of events; so is a jump ahead (a tab coming back, a recording).
+    if (t < beat.last || t > beat.last + 1) {
       beat.track.seek(t);
     }
     const st = beat.track.update(t);
@@ -321,7 +322,7 @@ function updateBeat(dt) {
   u.tunnelWaveS.value = beat.waveAt + (u.tunnelTravel.value - beat.waveAt) * 4;
   u.tunnelWaveAmp.value = beat.wave;
 }
-showHint("Drag to spin the card · move the pointer to light it · R for a new card", "Drag to spin the card · tap {randomize} for a new card");
+showHint("Drag to spin the card · scroll to zoom · move the pointer to light it · R for a new card", "Drag to spin the card · tap {randomize} for a new card");
 gui.show();
 
 const scene = new Scene();
@@ -574,14 +575,18 @@ function randomizeLook() {
   const lo = MathUtils.lerp(20, 3, k), hi = MathUtils.lerp(40, 15, k);
   params.bandwidth.set(Math.max(3, Math.round(lo + Math.random() * (hi - lo))));
 }
-onRandomize(() => {
-  if (!started) return randomizeLook();
+// The next card: randomized, then over (panel values) on top; with onBar it lands on the next bar line.
+function nextCard(over = {}, onBar = false) {
   const was = params.$snapshot();
   randomizeLook();
+  for (const [key, value] of Object.entries(over)) params[key]?.set(value);
   const next = params.$snapshot();
   params.$apply(was);
+  flip.onBar = onBar;
   requestCard(next);
-});
+}
+// (The bar handler sets flip.onBar before randomizing, so its changes land on the beat.)
+onRandomize(() => (started ? nextCard({}, !!flip.onBar) : randomizeLook()));
 
 // The pointer carries a torch light; on touch screens it wanders by itself.
 const pointer = new Vector2(0.1, 0.16);
@@ -616,10 +621,24 @@ shown.shape = first.shape;
 const compileScene = new Scene();
 for (const shape of Object.keys(CARD_STYLES)) compileScene.add(new Mesh(geometries[shape], materials[shape]));
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
-await load.compile.track(Promise.all([pipeline.compileAsync(compileScene, camera), pipeline.compileAsync(scene, camera), tunnel.prebake(nextFrame), preloadShatterForms(nextFrame)]), 4);
+await load.compile.track(Promise.all([pipeline.compileAsync(compileScene, camera), pipeline.compileAsync(scene, camera), tunnel.prebake(nextFrame), preloadShatterForms(nextFrame), preloadLightScenes()]), 4);
 started = true;
-// Everything is loaded and compiled: the music can start.
-music.play();
+// The music starts once the page renders smoothly: the first frames still compile what compileAsync didn't cover (the
+// diorama, the card's blur, the prefilter), so it waits for 3 frames in a row with no new program, each under 100 ms.
+// Frame times are measured here: the render loop's dt is clamped, and stops while paused.
+const musicGate = { programs: -1, smooth: 0, done: false, last: 0 };
+function startMusicWhenSmooth() {
+  if (musicGate.done) return;
+  const now = performance.now(), frame = now - musicGate.last;
+  musicGate.last = now;
+  const programs = renderer.info.programs?.length ?? 0;
+  musicGate.smooth = programs === musicGate.programs && frame < 100 ? musicGate.smooth + 1 : 0;
+  musicGate.programs = programs;
+  if (musicGate.smooth >= 3) {
+    musicGate.done = true;
+    music.play();
+  }
+}
 
 gui.addSeparator();
 gui.addText(keysHelp());
@@ -631,6 +650,9 @@ window.app = {
   controls,
   uniforms: u,
   diorama,
+  // For recordings: the song (its clock can be driven), and the next card by hand.
+  music,
+  nextCard,
   // tools/perf times these as their own segments.
   perfSegments: (wrap) => {
     wrap(diorama, "render", "diorama");
@@ -679,6 +701,7 @@ if (stateParam) {
   }
 }
 render(({ time, dt }) => {
+  startMusicWhenSmooth();
   time += timeShift;
   lastTime = time;
   autoChange.update(dt);

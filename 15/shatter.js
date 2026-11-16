@@ -12,10 +12,16 @@ export const BURSTS = [
   { subject: "bronze", form: "torus" },
 ];
 
+// Day 2's shapes tessellated coarser: seen through the hologram's blurred, half-resolution bands, its full detail (some
+// 350k vertices a burst) only cost frames to merge and bake.
+const DETAIL = 0.6;
+// Chips smaller than this are left out: too small to show, and each one a part to merge.
+const MIN_CHIP = 0.03;
+
 // Builds every form's shape up front (each is built once and kept), a frame apart.
 export async function preloadShatterForms(yieldFrame) {
   for (const { form } of BURSTS) {
-    await loadShape(form);
+    await loadShape(form, { detail: DETAIL });
     await yieldFrame?.();
   }
 }
@@ -46,7 +52,7 @@ const _x = new Vector3(1, 0, 0);
 // spray: how much of the subject's spray (0..1), as day 2's slider.
 export async function buildShatter({ seed, subject: subjectName, form, material, spray: amount = 0.5, yieldFrame = null }) {
   const subject = SUBJECTS[subjectName] ?? SUBJECTS.shell;
-  const shape = await loadShape(form);
+  const shape = await loadShape(form, { detail: DETAIL });
   const group = new Group();
   const rand = mulberry32(seed);
   // A side burst (day 2's), from a side turned 25 to 55 degrees off the viewer (+z, as the plate shows it): the pieces
@@ -109,6 +115,7 @@ export async function buildShatter({ seed, subject: subjectName, form, material,
     const big = rand() < 0.012;
     const size = big ? 0.12 + 0.12 * rand() : 0.012 + 0.07 * rand() ** 2.2;
     const speed = (1 + 6 * rand() ** 1.5) * e;
+    if (size < MIN_CHIP) continue;
     chips.push({ start: p.clone().addScaledVector(n, -subject.thickness * 0.5), velocity: launch(n.clone(), big ? speed * 1.6 + 2 : speed), size, axis: randomDirection(rand), spin: 3 + 14 * rand(), turn: randomDirection(rand) });
   }
   const tears = pieces.flatMap((piece) => piece.tear);

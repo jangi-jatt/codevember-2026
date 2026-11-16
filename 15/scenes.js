@@ -1,14 +1,14 @@
 // Light scenes for the hologram, beside the gear spray and the burst: Suzanne's head, a cluster of crystals, one big
 // gear with pinions round it, chess pieces on a board, a knot and an atom. Each builds in a frame or two, from a seed.
 // userData.surf: metalness, roughness, albedo, per mesh.
-import { BufferGeometry, Float32BufferAttribute, BufferAttribute, Group, Mesh, LatheGeometry, Vector2, Vector3, Quaternion, TorusKnotGeometry, TorusGeometry, IcosahedronGeometry, BoxGeometry, CylinderGeometry } from "three";
+import { BufferGeometry, Float32BufferAttribute, BufferAttribute, Group, Mesh, LatheGeometry, Vector2, Vector3, Quaternion, TorusKnotGeometry, TorusGeometry, IcosahedronGeometry, BoxGeometry, CylinderGeometry, SphereGeometry, RingGeometry, ConeGeometry } from "three";
 import { mergeVertices } from "third_party/BufferGeometryUtils.js";
 import { RoundedBoxGeometry } from "third_party/three-rounded-box.js";
 import { suzanneGeometry } from "modules/suzanne/suzanneMesh.js";
 import { getSolid, families } from "modules/polyhedra/solids.js";
 import * as gearLib from "../11/gears.js";
 
-export const LIGHT_SCENES = ["head", "crystals", "gear", "chess", "knot", "atom", "cube"];
+export const LIGHT_SCENES = ["head", "crystals", "gear", "chess", "knot", "atom", "cube", "saturn", "pyramid"];
 
 const mulberry = (a) => () => {
   a = (a + 0x6d2b79f5) | 0;
@@ -65,22 +65,33 @@ function gearGeometry(data) {
   return g;
 }
 
-let suzanneText = null;
+// Suzanne subdivided and centred, built once (preloadLightScenes) and copied for each card.
+let suzanne = null;
+async function headGeometry() {
+  if (!suzanne) {
+    const text = await (await fetch(new URL("../assets/suzanne.obj", import.meta.url))).text();
+    const g = suzanneGeometry(text, 2);
+    g.computeVertexNormals();
+    g.computeBoundingBox();
+    const c = g.boundingBox.getCenter(new Vector3());
+    g.translate(-c.x, -c.y, -c.z);
+    suzanne = g;
+  }
+  return suzanne;
+}
+export function preloadLightScenes() {
+  return headGeometry();
+}
 async function head(r, group) {
-  suzanneText ??= await (await fetch(new URL("../assets/suzanne.obj", import.meta.url))).text();
-  const g = suzanneGeometry(suzanneText, 2);
-  g.computeVertexNormals();
-  g.computeBoundingBox();
-  const c = g.boundingBox.getCenter(new Vector3());
-  g.translate(-c.x, -c.y, -c.z);
-  add(group, g, SATIN, { quaternion: new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), (r() - 0.5) * 0.8) });
+  add(group, (await headGeometry()).clone(), SATIN, { quaternion: new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), (r() - 0.5) * 0.8) });
 }
 
 // A star polyhedron in the middle, smaller solids round it at different depths.
-function crystals(r, group) {
+async function crystals(r, group, yieldFrame) {
   const stars = families.keplerPoinsot;
   const centre = getSolid(stars[Math.floor(r() * stars.length)]);
   add(group, solidGeometry(centre), SHINY, { quaternion: new Quaternion().setFromAxisAngle(randomDirection(r), r() * 6.3), scale: 0.55 });
+  await yieldFrame();
   const others = [...families.platonic, ...families.archimedean.slice(0, 6)];
   const placed = [];
   for (let i = 0, tries = 0; i < 9 && tries < 200; tries++) {
@@ -90,16 +101,18 @@ function crystals(r, group) {
     placed.push({ at, size });
     add(group, solidGeometry(getSolid(others[Math.floor(r() * others.length)])), r() < 0.5 ? SHINY : GLOSS, { position: at, quaternion: new Quaternion().setFromAxisAngle(randomDirection(r), r() * 6.3), scale: size });
     i++;
+    await yieldFrame();
   }
 }
 
 // One big gear with pinions meshing round it; each pinion is a compound gear, a second wheel on its shaft standing
 // out in front or behind, so the train has depth. Seen in three-quarter view.
-function gear(r, group) {
+async function gear(r, group, yieldFrame) {
   const m = 0.03;
   const train = new Group();
   const big = gearLib.spurGear({ teeth: 40 + Math.floor(r() * 12), module: m, width: m * 6, bore: m * 3, hub: m * 6, style: ["spokes", "holes", "web"][Math.floor(r() * 3)], seed: Math.floor(r() * 1e6), chamfer: 0.18 * m });
   add(train, gearGeometry(big), SHINY);
+  await yieldFrame();
   // The big gear's shaft.
   add(train, new CylinderGeometry(m * 2.2, m * 2.2, m * 26, 24).rotateX(Math.PI / 2), SATIN);
   const count = 3 + Math.floor(r() * 3);
@@ -121,6 +134,7 @@ function gear(r, group) {
     const shaft = add(axle, new CylinderGeometry(m * 1.2, m * 1.2, reach + m * 6, 16).rotateX(Math.PI / 2), SATIN);
     shaft.position.z = side * reach * 0.5;
     train.add(axle);
+    await yieldFrame();
   }
   // Three-quarter view: turned and tipped toward the viewer.
   train.rotation.set(-0.5 + 0.15 * r(), (r() < 0.5 ? -1 : 1) * (0.7 + 0.2 * r()), 0.2 * (r() - 0.5));
@@ -193,6 +207,56 @@ function atom(r, group) {
   }
 }
 
+// Saturn: a banded planet (latitude bands in alternating tones), a tilted ring system with a dark gap, and a moon or
+// three, the whole tipped toward the viewer.
+function saturn(r, group) {
+  const system = new Group();
+  const bands = 7;
+  for (let b = 0; b < bands; b++) {
+    const from = (b / bands) * Math.PI, span = Math.PI / bands;
+    const tone = b % 2 ? 0.55 + 0.1 * r() : 0.8 + 0.1 * r();
+    add(system, new SphereGeometry(0.42, 64, 6, 0, Math.PI * 2, from, span), [0.0, 0.5, tone]);
+  }
+  // The rings: inner to outer, a gap after the second, each its own brightness.
+  const rings = [[0.55, 0.66, 0.5], [0.67, 0.84, 0.9], [0.9, 1.02, 0.75], [1.03, 1.08, 0.45]];
+  for (const [inner, outer, tone] of rings) add(system, new RingGeometry(inner, outer, 128, 1).rotateX(-Math.PI / 2), [0.1, 0.4, tone * (0.9 + 0.2 * r())]);
+  const moons = 1 + Math.floor(r() * 3);
+  for (let k = 0; k < moons; k++) {
+    const a = r() * Math.PI * 2, d = 1.2 + 0.25 * r();
+    add(system, new SphereGeometry(1, 24, 16), GLOSS, { position: new Vector3(Math.cos(a) * d, (r() - 0.5) * 0.4, Math.sin(a) * d), scale: 0.05 + 0.04 * r() });
+  }
+  system.rotation.set(0.35 + 0.2 * r(), r() * Math.PI * 2, (r() < 0.5 ? -1 : 1) * (0.25 + 0.2 * r()));
+  group.add(system);
+}
+
+// A pyramid, smooth or stepped, its capstone floating above it with an orb and a halo in the gap, seen three-quarter on.
+const flat = (g) => {
+  const f = g.toNonIndexed();
+  f.computeVertexNormals();
+  return f;
+};
+function pyramid(r, group) {
+  const temple = new Group();
+  const base = 1.1, top = 0.36, height = 0.75;
+  if (r() < 0.5) add(temple, flat(new CylinderGeometry(top / Math.SQRT2, base / Math.SQRT2, height, 4, 1).rotateY(Math.PI / 4)), SATIN, { position: new Vector3(0, height / 2, 0) });
+  else {
+    const steps = 6;
+    for (let k = 0; k < steps; k++) {
+      const w = base + (top - base) * (k / (steps - 1));
+      add(temple, new BoxGeometry(w, height / steps, w), SATIN, { position: new Vector3(0, (k + 0.5) * (height / steps), 0) });
+    }
+  }
+  const lift = height + 0.32;
+  add(temple, flat(new ConeGeometry(top / Math.SQRT2 * 1.05, 0.3, 4, 1).rotateY(Math.PI / 4)), SHINY, { position: new Vector3(0, lift + 0.15, 0) });
+  add(temple, new SphereGeometry(1, 32, 16), GLOSS, { position: new Vector3(0, height + 0.16, 0), scale: 0.1 });
+  add(temple, new TorusGeometry(0.24, 0.012, 8, 96), SHINY, { position: new Vector3(0, height + 0.16, 0), quaternion: new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), Math.PI / 2 - 0.25) });
+  temple.position.y = -(lift + 0.3) / 2;
+  const view = new Group();
+  view.add(temple);
+  view.rotation.set(0.3 + 0.1 * r(), (r() < 0.5 ? -1 : 1) * (0.35 + 0.3 * r()), 0);
+  group.add(view);
+}
+
 // A Rubik's cube caught mid-turn: 26 rounded cubies with their stickers (each face's colour as a grey, which is all a
 // hologram keeps), one layer twisted part way, the whole seen corner-on.
 const STICKER_GREYS = [0.95, 0.7, 0.55, 0.4, 0.82, 0.28];
@@ -232,13 +296,14 @@ function cube(r, group) {
   group.add(body);
 }
 
-const BUILDERS = { head, crystals, gear, chess, knot, atom, cube };
+const BUILDERS = { head, crystals, gear, chess, knot, atom, cube, saturn, pyramid };
 // Scenes that sit further back in the window.
-const FILL = { cube: 0.72 };
+const FILL = { cube: 0.72, pyramid: 0.8 };
 
-export async function buildLightScene(kind, seed) {
+// yieldFrame: awaited between the heavier pieces, so a build is spread over frames.
+export async function buildLightScene(kind, seed, { yieldFrame = async () => {} } = {}) {
   const r = mulberry(seed * 2654435761 + kind.length * 97);
   const group = new Group();
-  await BUILDERS[kind](r, group);
+  await BUILDERS[kind](r, group, yieldFrame);
   return { group, fill: FILL[kind] ?? 1, dispose: () => group.traverse((o) => o.geometry?.dispose()) };
 }

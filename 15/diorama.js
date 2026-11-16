@@ -108,17 +108,20 @@ async function mergeScene(group) {
   const P = new Float32Array(nv * 3), N = new Float32Array(nv * 3), S = new Float32Array(nv * 3), I = new Uint32Array(ni);
   const v = new Vector3();
   let ov = 0, oi = 0, flipped = 0;
+  // A frame's share of the work: about 15k vertices or triangles, big parts split too.
   let budget = 0;
-  for (const p of parts) {
-    // A frame's share of the work: about 15k vertices.
-    budget += p.geometry.attributes.position.count;
+  const share = async (n) => {
+    budget += n;
     if (budget > 15000) {
       budget = 0;
       await nextFrame();
     }
+  };
+  for (const p of parts) {
     const g = p.geometry, pos = g.attributes.position, nor = g.attributes.normal;
     _n.getNormalMatrix(p.matrix);
     for (let k = 0; k < pos.count; k++) {
+      if ((k & 1023) === 1023) await share(1024);
       const o = (ov + k) * 3;
       v.fromBufferAttribute(pos, k).applyMatrix4(p.matrix);
       P[o] = v.x, P[o + 1] = v.y, P[o + 2] = v.z;
@@ -133,6 +136,7 @@ async function mergeScene(group) {
     // double-sided material lights a face it thinks is a back face as the inside of a shell.
     const n = oi + (g.index ? g.index.count : pos.count);
     for (let t = oi; t < n; t += 3) {
+      if ((t - oi) % 3072 === 3069) await share(1024);
       const a = I[t] * 3, b = I[t + 1] * 3, c = I[t + 2] * 3;
       const ux = P[b] - P[a], uy = P[b + 1] - P[a + 1], uz = P[b + 2] - P[a + 2];
       const vx = P[c] - P[a], vy = P[c + 1] - P[a + 1], vz = P[c + 2] - P[a + 2];
@@ -148,6 +152,7 @@ async function mergeScene(group) {
     ov += pos.count;
     oi += g.index ? g.index.count : pos.count;
   }
+  await nextFrame();
   const geometry = new BufferGeometry();
   geometry.setAttribute("position", new BufferAttribute(P, 3));
   geometry.setAttribute("normal", new BufferAttribute(N, 3));
@@ -155,6 +160,7 @@ async function mergeScene(group) {
   geometry.setIndex(new BufferAttribute(I, 1));
   geometry.userData.flipped = flipped;
   geometry.computeBoundingSphere();
+  await nextFrame();
   const c = geometry.boundingSphere.center.clone();
   geometry.translate(-c.x, -c.y, -c.z);
   geometry.computeBoundingSphere();
@@ -273,7 +279,8 @@ async function bakeLighting(renderer, geometry, { keyCount = 64, skyCount = 160,
     pointsMaterial.uniforms.gain.value.copy(gain);
     renderer.setRenderTarget(acc);
     renderer.render(pointsScene, cam);
-    if ((i + 1) % batch === 0) {
+    // The first pass alone (it uploads the geometry), then batch a frame.
+    if (i === 0 || (i + 1) % batch === 0) {
       renderer.setRenderTarget(prevTarget);
       renderer.autoClear = prevAutoClear;
       await nextFrame();
@@ -494,7 +501,7 @@ export function createDiorama(renderer, { shadowSize = 2048 } = {}) {
         burst.place(0.3);
         built = burst;
       } else if (kind === "gears") built = await buildGearSpray(seed, { yieldFrame: nextFrame });
-      else built = await buildLightScene(kind, seed);
+      else built = await buildLightScene(kind, seed, { yieldFrame: nextFrame });
       await nextFrame();
       const geometry = await mergeScene(built.group);
       built.dispose();
