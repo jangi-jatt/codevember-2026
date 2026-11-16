@@ -70,7 +70,7 @@
       .bar { width: min(240px, 40vw); height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
       .bar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
 
-      .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; list-style: none; }
+      .gallery { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; list-style: none; }
       .gallery li { position: relative; aspect-ratio: 1; border-radius: 8px; overflow: hidden; background: var(--tile); }
       .gallery img {
         position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
@@ -82,7 +82,7 @@
         background: linear-gradient(transparent 55%, rgba(0, 0, 0, 0.55));
       }
       .gallery .number { font: 600 12px/1 var(--mono); letter-spacing: 0.06em; opacity: 0.85; }
-      .gallery .prompt { font-weight: 700; font-size: 24px; line-height: 1.05; letter-spacing: -0.015em; }
+      .gallery .prompt { font-weight: 700; font-size: clamp(17px, 2vw, 24px); line-height: 1.05; letter-spacing: -0.015em; }
       .gallery img:not(.shown) { opacity: 0; }
       .gallery li:hover img, .gallery li:focus-within img { transform: scale(1.045); }
       .gallery a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 8px; }
@@ -91,7 +91,7 @@
       .gallery .next .when { position: absolute; top: 14px; left: 14px; font: 600 12px/1 var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
       .gallery .next .number { color: var(--muted); }
 
-      .upcoming { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 24px; list-style: none; margin-top: 28px; }
+      .upcoming { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0 12px; list-style: none; margin-top: 28px; }
       .upcoming li { display: flex; align-items: baseline; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line); color: var(--muted); }
       .upcoming b { font: 400 12px/1 var(--mono); min-width: 2ch; }
       .upcoming span { font-weight: 500; font-size: 17px; }
@@ -100,7 +100,7 @@
       section { padding-top: 72px; }
       h2 { font-weight: 700; font-size: clamp(28px, 4vw, 40px); letter-spacing: -0.02em; line-height: 1.05; margin-bottom: 8px; }
       .sub { color: var(--muted); margin-bottom: 24px; max-width: 60ch; }
-      .explainers { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; list-style: none; }
+      .explainers { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; list-style: none; }
       .explainers a {
         display: flex; align-items: center; gap: 14px; padding: 10px; height: 100%;
         background: var(--panel); border-radius: 8px; text-decoration: none;
@@ -125,12 +125,18 @@
       footer a { color: var(--ink); text-decoration: none; }
       footer a:hover { color: var(--accent); }
 
+      @media (max-width: 900px) {
+        .explainers { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      }
+
       @media (max-width: 600px) {
         header { padding: 64px 0 28px; }
         .gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
         .gallery a { padding: 10px; }
         .gallery .prompt { font-size: 19px; }
         .gallery .next .when { top: 10px; left: 10px; }
+        .upcoming { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 8px; }
+        .explainers { grid-template-columns: minmax(0, 1fr); gap: 8px; }
         section { padding-top: 56px; }
       }
       @media (prefers-reduced-motion: reduce) {
