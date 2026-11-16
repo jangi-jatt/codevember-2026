@@ -182,6 +182,8 @@ const fragmentPars = /* glsl */ `
   uniform float uFoil;
   uniform sampler2D uSmudge;
   uniform float uSmudgeAmount;
+  // The lamp above the camera (uLights[3]) reflected in the card: a hotspot where it mirrors toward the eye.
+  uniform float uTorchGain;
 
   // How grazing the glass is seen here (set per pixel in surface()), and the hue slide it causes.
   float holoGraze = 0.0;
@@ -1098,6 +1100,15 @@ void surface(inout Surface s) {
     s.specular = vFaceP.x < 0.5 ? 1.6 : uPlateReflection / 0.3;
 #endif
     holoMetal = s.metalness;
+    {
+      // The lamp's reflection: a tight core and a soft halo, white on the glass, rainbow on the foil; only on the side it
+      // lights.
+      vec3 Lt = normalize(uLights[3]);
+      float nh = max(dot(s.normal, normalize(Lt + worldV)), 0.0);
+      float spot = (pow(nh, 3000.0) * 2.5 + pow(nh, 300.0) * 0.15) * step(0.0, dot(s.normal, Lt));
+      vec3 tint = mix(vec3(1.0, 0.97, 0.92), spectral(430.0 + 260.0 * fract(dot(vUv, vec2(2.3, 1.7)) + nh * 6.0)) * 1.3, s.metalness);
+      s.emissive += tint * spot * uTorchGain;
+    }
 #endif
 }
 
@@ -1152,7 +1163,7 @@ export function createHologramUniforms({ portal, replays, look = "spectrum" } = 
     uThree: { value: 3 },
     uFour: { value: 4 },
 
-    // Lights for the grating, in the camera's frame (main.js): key, back, top and the pointer's torch.
+    // Lights for the grating, in the camera's frame (main.js): key, back, top and a lamp just above the camera.
     uLights: { value: [new Vector3(0.42, 0.46, 0.782).normalize(), new Vector3(-0.52, 0.31, -0.795).normalize(), new Vector3(-0.26, 0.93, 0.258).normalize(), new Vector3(0.1, 0.18, 0.978).normalize()] },
     uLightPower: { value: [1.18, 0.3, 0.38, 0.95] },
 
@@ -1202,6 +1213,7 @@ export function createHologramUniforms({ portal, replays, look = "spectrum" } = 
     uSmudge: { value: null },
     uSmudgeAmount: { value: 1 },
     uReflectLift: { value: 0 },
+    uTorchGain: { value: 1 },
   };
 }
 

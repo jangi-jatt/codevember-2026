@@ -2,7 +2,7 @@ import { fromDefaults, renderer, camera, controls, render, onResize, onPause, ad
 import { createMusic } from "./music.js";
 import { Track } from "batec/track.js";
 import { GUI, signal } from "guspira";
-import { Scene, Mesh, Group, Vector2, Vector3, Color, MathUtils, Matrix4, Quaternion } from "three";
+import { Scene, Mesh, Group, Vector3, Color, MathUtils, Matrix4, Quaternion } from "three";
 import { Pipeline } from "modules/pipeline/Pipeline.js";
 import { SHAPE_LIST, buildSurfaceGeometry } from "./geometries.js";
 import { LOOK_PRESETS, createHologramUniforms, createHologramMaterial } from "./hologram.js";
@@ -322,7 +322,7 @@ function updateBeat(dt) {
   u.tunnelWaveS.value = beat.waveAt + (u.tunnelTravel.value - beat.waveAt) * 4;
   u.tunnelWaveAmp.value = beat.wave;
 }
-showHint("Drag to spin the card · scroll to zoom · move the pointer to light it · R for a new card", "Drag to spin the card · tap {randomize} for a new card");
+showHint("Drag to spin the card · scroll to zoom · R for a new card", "Drag to spin the card · tap {randomize} for a new card");
 gui.show();
 
 const scene = new Scene();
@@ -588,15 +588,6 @@ function nextCard(over = {}, onBar = false) {
 // (The bar handler sets flip.onBar before randomizing, so its changes land on the beat.)
 onRandomize(() => (started ? nextCard({}, !!flip.onBar) : randomizeLook()));
 
-// The pointer carries a torch light; on touch screens it wanders by itself.
-const pointer = new Vector2(0.1, 0.16);
-let mousePointer = false;
-window.addEventListener("pointermove", (e) => {
-  if (e.pointerType !== "mouse") return;
-  mousePointer = true;
-  pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1);
-});
-const torch = new Vector3(0.12, 0.22, 0.968).normalize();
 const camRight = new Vector3(), camUp = new Vector3(), camFwd = new Vector3();
 const _center = new Vector3(), _n = new Vector3(), _b = new Vector3(), _p = new Vector3();
 const _stage = new Matrix4();
@@ -762,13 +753,12 @@ render(({ time, dt }) => {
   camera.updateMatrixWorld();
   camera.matrixWorld.extractBasis(camRight, camUp, camFwd);
 
-  if (!mousePointer) pointer.set(Math.sin(time * 0.37) * 0.55, 0.2 + Math.cos(time * 0.23) * 0.35);
-  const torchTarget = camFwd.clone().multiplyScalar(0.92).addScaledVector(camRight, pointer.x * 0.95).addScaledVector(camUp, pointer.y * 0.95 + 0.1).normalize();
   const lights = u.uLights.value;
   lights[0].copy(camFwd).multiplyScalar(0.78).addScaledVector(camRight, 0.42).addScaledVector(camUp, 0.45).normalize();
   lights[1].copy(camFwd).multiplyScalar(-0.78).addScaledVector(camRight, -0.52).addScaledVector(camUp, 0.31).normalize();
   lights[2].copy(camFwd).multiplyScalar(0.24).addScaledVector(camRight, -0.26).addScaledVector(camUp, 0.93).normalize();
-  lights[3].lerp(torch.copy(torchTarget), 1 - Math.exp(-10 * dt)).normalize();
+  // A lamp just above the camera, moving with it.
+  lights[3].copy(camFwd).multiplyScalar(0.92).addScaledVector(camRight, 0.1).addScaledVector(camUp, 0.25).normalize();
   u.uModelRot.value.setFromMatrix4(mesh.matrixWorld);
   u.uHeroCenter.value.setFromMatrixPosition(hero.matrixWorld);
   u.uCamRight.value.copy(camRight);
