@@ -84,10 +84,9 @@ float tBand(float r, float width, float w, float mv) {
   return fade * (1.0 - smoothstep(abs(width - 0.5 * mv), width + 0.5 * mv + w, r));
 }
 
-// Emission of the wall in one style at angle a, s metres down the tunnel, d ahead of the card; blur widens lines (for
-// the environment's blurred bake); da, ds: screen widths of a radian and a metre.
-// mv: how far the wall travels during the shutter (0: still), smearing the lines across the tube.
-vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, float ds, float mv) {
+// The pattern styles (tiles, Memphis, suns) at one point: drawn as shapes, they are averaged over the streaming with
+// taps, but only the pattern is (the rest of the wall is evaluated once).
+vec3 tShape(float style, float a, float s, float blur, float da, float ds) {
   vec3 col = vec3(0.0);
   if (style == 0.0) {
     // Rounded square tiles in bands of colour, a few dark.
@@ -109,6 +108,122 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     float glow = mix(tNeon(abs(box), 0.025, w), 0.3, smoothstep(0.15, 0.5, w));
     col = tPalette(floor(id.y / 9.0) + step(0.8, h)) * glow * lit;
     col += vec3(0.01, 0.002, 0.025);
+  } else if (style == 5.0) {
+    // Memphis: 80s shapes scattered one to each 3 x 3 block of cells over a faint grid: gradient discs, pink triangles,
+    // yellow zigzags, outlined squares and hexagons, striped discs. Each turns a little on the beat.
+    vec2 g = vec2(a / 6.2831853 * LANES, s / UNIT);
+    vec2 gd = min(fract(g), 1.0 - fract(g));
+    float w = max(da * RADIUS_T, ds) + blur;
+    col = vec3(0.25, 0.1, 0.5) * (1.0 - smoothstep(0.0, 0.02 + w / UNIT, min(gd.x, gd.y))) * 0.25;
+    vec2 uv = g / 3.0;
+    vec2 id = vec2(mod(floor(uv.x), LANES / 3.0), floor(uv.y));
+    vec2 h2 = vec2(tHash(id + 1.7), tHash(id + 8.3));
+    float kind = floor(tHash(id + 5.1) * 6.0);
+    float B = 3.0 * UNIT;
+    vec2 p = (fract(uv) - 0.5 - (h2 - 0.5) * 0.12) * B;
+    float ang = h2.x * 6.2831853 + (floor(tunnelBeats) + smoothstep(0.0, 0.3, fract(tunnelBeats))) * (h2.y - 0.5) * 0.6;
+    p = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * p;
+    float R = 0.32 * B;
+    vec3 cyan = vec3(0.05, 0.85, 1.0), magenta = vec3(1.0, 0.1, 0.85), yellow = vec3(1.0, 0.9, 0.15), purple = vec3(0.45, 0.15, 1.0), orange = vec3(1.0, 0.55, 0.05);
+    float fill = 0.0, line = 0.0;
+    vec3 tint = cyan;
+    if (kind < 1.0) {
+      // A disc, cyan to purple.
+      fill = 1.0 - smoothstep(-w, w, length(p) - R);
+      tint = mix(purple, cyan, clamp(0.5 - p.y / R * 0.6, 0.0, 1.0));
+    } else if (kind < 2.0) {
+      // A triangle, pink.
+      vec2 q = p / R;
+      q.x = abs(q.x);
+      float sd = max(q.x * 0.866 + q.y * 0.5, -q.y) - 0.5;
+      fill = 1.0 - smoothstep(-w / R, w / R, sd);
+      tint = mix(magenta, vec3(1.0, 0.5, 0.9), clamp(0.5 + p.y / R, 0.0, 1.0));
+    } else if (kind < 3.0) {
+      // A zigzag, yellow.
+      float zig = (abs(fract(p.x / (0.28 * R) * 0.5) - 0.5) * 2.0 - 0.5) * 0.35 * R;
+      line = (1.0 - smoothstep(0.035 * R, 0.035 * R + w, abs(p.y - zig))) * step(abs(p.x), 1.1 * R);
+      tint = yellow;
+    } else if (kind < 4.0) {
+      // An outlined square, cyan.
+      vec2 q = abs(p) - R * 0.85;
+      line = 1.0 - smoothstep(0.02 * R, 0.02 * R + w, abs(max(q.x, q.y)));
+      tint = cyan;
+    } else if (kind < 5.0) {
+      // A striped disc, pink or yellow.
+      float inside = 1.0 - smoothstep(-w, w, length(p) - R * 0.9);
+      float stripe = smoothstep(0.45, 0.55, abs(fract(p.y / (0.22 * R)) - 0.5) * 2.0);
+      fill = inside * stripe;
+      tint = h2.y < 0.5 ? magenta : yellow;
+    } else {
+      // An outlined hexagon, orange.
+      vec2 q = abs(p);
+      float hex = max(q.x * 0.866 + q.y * 0.5, q.y) - R;
+      line = 1.0 - smoothstep(0.035 * R, 0.035 * R + w, abs(hex));
+      tint = orange;
+    }
+    col += tint * (fill * 0.9 + line * 2.2);
+    col += vec3(0.005, 0.002, 0.014);
+  } else {
+    // Retro suns: one to each 2 x 2 block, a sunset disc, a downward triangle or a square, in a two-colour gradient,
+    // its lower half cut into stripes that widen toward the bottom; the stripes slide down on the beat.
+    vec2 uv = vec2(a / 6.2831853 * LANES, s / UNIT) / 2.0;
+    vec2 id = vec2(mod(floor(uv.x), LANES / 2.0), floor(uv.y));
+    float B = 2.0 * UNIT;
+    // Up is away from the card, down the tunnel.
+    vec2 p = (fract(uv) - 0.5) * B;
+    float h = tHash(id + 4.4), hk = tHash(id + 7.9), hc = tHash(id + 2.2);
+    float w = max(da * RADIUS_T, ds) + blur;
+    float R = 0.3 * B;
+    float kind = floor(hk * 3.0);
+    float sd;
+    if (kind < 1.0) sd = length(p) - R;
+    else if (kind < 2.0) {
+      vec2 q = vec2(abs(p.x), p.y) / R;
+      sd = max(q.x * 0.894 - q.y * 0.447 - 0.447, q.y - 0.8) * R;
+    } else {
+      vec2 q = abs(p) - R * 0.85;
+      sd = max(q.x, q.y);
+    }
+    float fill = 1.0 - smoothstep(-w, w, sd);
+    float v = clamp(0.5 - p.y / (2.0 * R), 0.0, 1.0);
+    float slide = fract(tunnelBeats * 0.5) * 0.12;
+    float cut = smoothstep(0.42, 1.0, v);
+    float bands = fract((v + slide) / 0.12);
+    // Stripes fade to their average where they'd be finer than a few pixels.
+    float fine = smoothstep(0.2, 0.45, w / (2.0 * R * 0.12));
+    fill *= mix(1.0 - step(bands, cut * 0.7) * step(0.42, v), 1.0 - cut * 0.5, fine);
+    vec3 c0, c1;
+    float pk = floor(hc * 6.0);
+    if (pk < 1.0) { c0 = vec3(1.0, 0.55, 0.1); c1 = vec3(1.0, 0.1, 0.3); }
+    else if (pk < 2.0) { c0 = vec3(1.0, 0.15, 0.4); c1 = vec3(0.35, 0.15, 0.7); }
+    else if (pk < 3.0) { c0 = vec3(1.0, 0.8, 0.2); c1 = vec3(1.0, 0.2, 0.55); }
+    else if (pk < 4.0) { c0 = vec3(0.45, 0.2, 0.75); c1 = vec3(0.1, 0.7, 1.0); }
+    else if (pk < 5.0) { c0 = vec3(0.4, 0.75, 1.0); c1 = vec3(1.0, 0.3, 0.65); }
+    else { c0 = vec3(0.1, 0.4, 1.0); c1 = vec3(1.0, 0.25, 0.4); }
+    vec3 grad = mix(c0, c1, v);
+    float lit = h > 0.12 ? 1.0 : 0.15;
+    float breathe = 0.85 + 0.15 * sin((tunnelBeats + h * 4.0) * 1.5707963);
+    col = grad * grad * fill * 0.6 * lit * breathe;
+    // The sun's glow round it.
+    if (kind < 1.0) col += mix(c0, c1, 0.5) * exp(-max(sd, 0.0) / (0.12 * B)) * 0.12 * lit * (1.0 - fill);
+    col += vec3(0.006, 0.003, 0.016);
+  }
+  return col;
+}
+
+// Emission of the wall in one style at angle a, s metres down the tunnel, d ahead of the card; blur widens lines (for
+// the environment's blurred bake); da, ds: screen widths of a radian and a metre.
+// mv: how far the wall travels during the shutter (0: still), smearing the lines across the tube.
+vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, float ds, float mv) {
+  vec3 col = vec3(0.0);
+  if (style == 0.0 || style == 5.0 || style == 6.0) {
+    // As many taps as the travel spans pixels (a third), up to 10.
+    int n = int(clamp(ceil(mv / max(ds, 1e-5) / 3.0), 1.0, 10.0));
+    for (int i = 0; i < 10; i++) {
+      if (i >= n) break;
+      col += tShape(style, a, s + (n == 1 ? 0.0 : mv * ((float(i) + 0.5) / float(n) - 0.5)), blur, da, ds);
+    }
+    col /= float(n);
   } else if (style == 1.0) {
     // Sparse rings, cyan and magenta, over a deep blue wall with a glossy purple floor.
     float v = s / (4.0 * UNIT);
@@ -176,105 +291,6 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     float rr = abs(fract(s / (8.0 * UNIT) + 0.5) - 0.5) * 8.0 * UNIT;
     col += vec3(0.5, 0.2, 1.0) * mix(4.0 * tBand(rr, 0.006, ds + blur, mv), 0.03, smoothstep(0.1, 0.4, ds + blur)) * 0.25;
     col += vec3(0.004, 0.002, 0.012);
-  } else if (style == 5.0) {
-    // Memphis: 80s shapes scattered one to each 3 x 3 block of cells over a faint grid: gradient discs, pink triangles,
-    // yellow zigzags, outlined squares and hexagons, striped discs. Each turns a little on the beat.
-    vec2 g = vec2(a / 6.2831853 * LANES, s / UNIT);
-    vec2 gd = min(fract(g), 1.0 - fract(g));
-    float w = max(da * RADIUS_T, ds) + blur;
-    col = vec3(0.25, 0.1, 0.5) * (1.0 - smoothstep(0.0, 0.02 + w / UNIT, min(gd.x, gd.y))) * 0.25;
-    vec2 uv = g / 3.0;
-    vec2 id = vec2(mod(floor(uv.x), LANES / 3.0), floor(uv.y));
-    vec2 h2 = vec2(tHash(id + 1.7), tHash(id + 8.3));
-    float kind = floor(tHash(id + 5.1) * 6.0);
-    float B = 3.0 * UNIT;
-    vec2 p = (fract(uv) - 0.5 - (h2 - 0.5) * 0.12) * B;
-    float ang = h2.x * 6.2831853 + (floor(tunnelBeats) + smoothstep(0.0, 0.3, fract(tunnelBeats))) * (h2.y - 0.5) * 0.6;
-    p = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * p;
-    float R = 0.32 * B;
-    vec3 cyan = vec3(0.05, 0.85, 1.0), magenta = vec3(1.0, 0.1, 0.85), yellow = vec3(1.0, 0.9, 0.15), purple = vec3(0.45, 0.15, 1.0), orange = vec3(1.0, 0.55, 0.05);
-    float fill = 0.0, line = 0.0;
-    vec3 tint = cyan;
-    if (kind < 1.0) {
-      // A disc, cyan to purple.
-      fill = 1.0 - smoothstep(-w, w, length(p) - R);
-      tint = mix(purple, cyan, clamp(0.5 - p.y / R * 0.6, 0.0, 1.0));
-    } else if (kind < 2.0) {
-      // A triangle, pink.
-      vec2 q = p / R;
-      q.x = abs(q.x);
-      float sd = max(q.x * 0.866 + q.y * 0.5, -q.y) - 0.5;
-      fill = 1.0 - smoothstep(-w / R, w / R, sd);
-      tint = mix(magenta, vec3(1.0, 0.5, 0.9), clamp(0.5 + p.y / R, 0.0, 1.0));
-    } else if (kind < 3.0) {
-      // A zigzag, yellow.
-      float zig = (abs(fract(p.x / (0.28 * R) * 0.5) - 0.5) * 2.0 - 0.5) * 0.35 * R;
-      line = (1.0 - smoothstep(0.035 * R, 0.035 * R + w, abs(p.y - zig))) * step(abs(p.x), 1.1 * R);
-      tint = yellow;
-    } else if (kind < 4.0) {
-      // An outlined square, cyan.
-      vec2 q = abs(p) - R * 0.85;
-      line = 1.0 - smoothstep(0.02 * R, 0.02 * R + w, abs(max(q.x, q.y)));
-      tint = cyan;
-    } else if (kind < 5.0) {
-      // A striped disc, pink or yellow.
-      float inside = 1.0 - smoothstep(-w, w, length(p) - R * 0.9);
-      float stripe = smoothstep(0.45, 0.55, abs(fract(p.y / (0.22 * R)) - 0.5) * 2.0);
-      fill = inside * stripe;
-      tint = h2.y < 0.5 ? magenta : yellow;
-    } else {
-      // An outlined hexagon, orange.
-      vec2 q = abs(p);
-      float hex = max(q.x * 0.866 + q.y * 0.5, q.y) - R;
-      line = 1.0 - smoothstep(0.035 * R, 0.035 * R + w, abs(hex));
-      tint = orange;
-    }
-    col += tint * (fill * 0.9 + line * 2.2);
-    col += vec3(0.005, 0.002, 0.014);
-  } else if (style == 6.0) {
-    // Retro suns: one to each 2 x 2 block, a sunset disc, a downward triangle or a square, in a two-colour gradient,
-    // its lower half cut into stripes that widen toward the bottom; the stripes slide down on the beat.
-    vec2 uv = vec2(a / 6.2831853 * LANES, s / UNIT) / 2.0;
-    vec2 id = vec2(mod(floor(uv.x), LANES / 2.0), floor(uv.y));
-    float B = 2.0 * UNIT;
-    // Up is away from the card, down the tunnel.
-    vec2 p = (fract(uv) - 0.5) * B;
-    float h = tHash(id + 4.4), hk = tHash(id + 7.9), hc = tHash(id + 2.2);
-    float w = max(da * RADIUS_T, ds) + blur;
-    float R = 0.3 * B;
-    float kind = floor(hk * 3.0);
-    float sd;
-    if (kind < 1.0) sd = length(p) - R;
-    else if (kind < 2.0) {
-      vec2 q = vec2(abs(p.x), p.y) / R;
-      sd = max(q.x * 0.894 - q.y * 0.447 - 0.447, q.y - 0.8) * R;
-    } else {
-      vec2 q = abs(p) - R * 0.85;
-      sd = max(q.x, q.y);
-    }
-    float fill = 1.0 - smoothstep(-w, w, sd);
-    float v = clamp(0.5 - p.y / (2.0 * R), 0.0, 1.0);
-    float slide = fract(tunnelBeats * 0.5) * 0.12;
-    float cut = smoothstep(0.42, 1.0, v);
-    float bands = fract((v + slide) / 0.12);
-    // Stripes fade to their average where they'd be finer than a few pixels.
-    float fine = smoothstep(0.2, 0.45, w / (2.0 * R * 0.12));
-    fill *= mix(1.0 - step(bands, cut * 0.7) * step(0.42, v), 1.0 - cut * 0.5, fine);
-    vec3 c0, c1;
-    float pk = floor(hc * 6.0);
-    if (pk < 1.0) { c0 = vec3(1.0, 0.55, 0.1); c1 = vec3(1.0, 0.1, 0.3); }
-    else if (pk < 2.0) { c0 = vec3(1.0, 0.15, 0.4); c1 = vec3(0.35, 0.15, 0.7); }
-    else if (pk < 3.0) { c0 = vec3(1.0, 0.8, 0.2); c1 = vec3(1.0, 0.2, 0.55); }
-    else if (pk < 4.0) { c0 = vec3(0.45, 0.2, 0.75); c1 = vec3(0.1, 0.7, 1.0); }
-    else if (pk < 5.0) { c0 = vec3(0.4, 0.75, 1.0); c1 = vec3(1.0, 0.3, 0.65); }
-    else { c0 = vec3(0.1, 0.4, 1.0); c1 = vec3(1.0, 0.25, 0.4); }
-    vec3 grad = mix(c0, c1, v);
-    float lit = h > 0.12 ? 1.0 : 0.15;
-    float breathe = 0.85 + 0.15 * sin((tunnelBeats + h * 4.0) * 1.5707963);
-    col = grad * grad * fill * 0.6 * lit * breathe;
-    // The sun's glow round it.
-    if (kind < 1.0) col += mix(c0, c1, 0.5) * exp(-max(sd, 0.0) / (0.12 * B)) * 0.12 * lit * (1.0 - fill);
-    col += vec3(0.006, 0.003, 0.016);
   } else {
     // The synthwave grid: lines along and round the tube, magenta to cyan round it.
     vec2 uv = vec2(a / 6.2831853 * LANES, s / UNIT);
@@ -384,24 +400,9 @@ vec3 tunnelBlend(float a, float s, float d, float blur) {
   return tunnelBlendAt(a, s, d, blur, tAngleWidth(a), fwidth(s), 0.0);
 }
 
-// The styles drawn as shapes (tiles, Memphis, suns), which the streaming can't smear in closed form.
-bool tTapped(float style) { return style == 0.0 || style == 5.0 || style == 6.0; }
-
-// The wall as a camera sees it while it streams past for a shutter, over the len metres it travels then: its lines
-// smeared in closed form, or for the shape styles averaged with as many taps as that spans pixels (a third), up to 10.
+// The wall as a camera sees it while it streams past for a shutter, over the len metres it travels then.
 vec3 tunnelBlendMoving(float a, float s, float d, float len) {
-  float da = tAngleWidth(a);
-  float ds = fwidth(s);
-  vec3 st = tStyles(s);
-  if (!tTapped(st.x) && !(st.z > 0.0 && tTapped(st.y))) return tunnelBlendAt(a, s, d, 0.0, da, ds, len);
-  int n = int(clamp(ceil(len / max(ds, 1e-5) / 3.0), 1.0, 10.0));
-  vec3 col = vec3(0.0);
-  for (int i = 0; i < 10; i++) {
-    if (i >= n) break;
-    float o = n == 1 ? 0.0 : len * ((float(i) + 0.5) / float(n) - 0.5);
-    col += tunnelBlendAt(a, s + o, d + o, 0.0, da, ds, 0.0);
-  }
-  return col / float(n);
+  return tunnelBlendAt(a, s, d, 0.0, tAngleWidth(a), fwidth(s), len);
 }
 `;
 
@@ -430,12 +431,14 @@ vec3 displace(vec3 p, inout vec3 n) {
 `;
 
 // The tunnel as a glossy surface reflects it: the reflected ray met with the tube (its bend followed in a few steps)
-// and the wall drawn there, widened by the surface's roughness. pixelAngle: a screen pixel's angular size.
+// and the wall drawn there, widened by the surface's roughness and smeared by its streaming as the tunnel itself is.
+// pixelAngle: a screen pixel's angular size.
 export const TUNNEL_TRACE_GLSL = /* glsl */ `
 uniform float tunnelTravel;
 uniform float tunnelBend;
 uniform float tunnelTime;
 uniform float tunnelPixelAngle;
+uniform float tunnelBlurLen;
 ${wall}
 vec2 tCurveT(float s) {
   return vec2(sin(s * 0.021) + 0.6 * sin(s * 0.037 + 2.0), 0.8 * sin(s * 0.017 + 1.0) + 0.4 * sin(s * 0.043)) * 18.0;
@@ -462,7 +465,7 @@ vec3 traceTunnel(vec3 P, vec3 R, float rough) {
   float w = t * tunnelPixelAngle;
   float across = abs(dot(R.xy, normalize(q)));
   float blur = t * rough * rough * 1.5;
-  return tunnelBlendAt(atan(q.y, q.x), tunnelTravel - H.z, -H.z, blur, w / RADIUS_T, w / max(across, 0.05), 0.0) * tunnelLight;
+  return tunnelBlendAt(atan(q.y, q.x), tunnelTravel - H.z, -H.z, blur, w / RADIUS_T, w / max(across, 0.05), tunnelBlurLen) * tunnelLight;
 }
 `;
 
