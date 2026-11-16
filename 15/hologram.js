@@ -64,25 +64,6 @@ export const LOOK_PRESETS = {
     rampCycles: 1.0,
     stops: ['#2b0a7a', '#c2188f', '#ff3b1f', '#ff9d0a', '#ffe98a'],
   },
-  scarab: {
-    label: 'Scarab',
-    spacing: 1080,
-    order2: 0.30,
-    order3: 0.10,
-    hueShift: 0.0,
-    holoBrightness: 1.06,
-    holoSaturation: 1.20,
-    purity: 0.80,
-    softClip: 0.60,
-    glassIor: 1.55,
-    plateReflection: 0.30,
-    wear: 0.80,
-    tintMix: 0.0,
-    tintColor: '#19d6a0',
-    rampMix: 1.0,
-    rampCycles: 1.0,
-    stops: ['#0b8f4d', '#19d6a0', '#1f6fe0', '#6a25d9', '#c0208a'],
-  },
 };
 
 const vertexPars = /* glsl */ `
