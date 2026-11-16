@@ -1,9 +1,9 @@
-// The soundtrack: one looping track, downloaded while the page loads. The AudioContext is created on load: it plays at
-// once if the browser allows it, otherwise it starts on the first gesture.
+// The soundtrack: one looping track, downloaded and decoded while the page loads, played from play(). The AudioContext
+// is created on load: it runs at once if the browser allows it, otherwise it starts on the first gesture.
 import { fetchWithProgress } from "common";
 
 export function createMusic({ url = new URL("./sound/tunnel.mp3", import.meta.url).href, onProgress, volume = 0.7 } = {}) {
-  let ctx = null, gain = null, on = true, paused = false;
+  let ctx = null, gain = null, on = true, paused = false, startAt = 0, duration = 0, buffer = null, wanted = false;
   const data = fetchWithProgress(url, onProgress).then((r) => r.arrayBuffer());
   data.catch(() => {});
 
@@ -14,15 +14,22 @@ export function createMusic({ url = new URL("./sound/tunnel.mp3", import.meta.ur
     gain.gain.value = on ? volume : 0;
     gain.connect(ctx.destination);
     try {
-      const buffer = await ctx.decodeAudioData((await data).slice(0));
-      const source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.loop = true;
-      source.connect(gain);
-      source.start();
+      buffer = await ctx.decodeAudioData((await data).slice(0));
+      if (wanted) begin();
     } catch (e) {
       console.warn("music unavailable", e);
     }
+  }
+  // Starts the track (once decoded and asked for with play()).
+  function begin() {
+    if (!buffer || duration) return;
+    const source = ctx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.connect(gain);
+    source.start();
+    startAt = ctx.currentTime;
+    duration = buffer.duration;
   }
   start();
   const resume = () => {
@@ -40,8 +47,21 @@ export function createMusic({ url = new URL("./sound/tunnel.mp3", import.meta.ur
 
   return {
     loaded: data,
+    // Begins playing (the page calls it once everything is ready).
+    play() {
+      wanted = true;
+      begin();
+    },
     get enabled() {
       return on;
+    },
+    // Seconds into the track (looping), or -1 while it isn't playing.
+    get time() {
+      return ctx && duration && ctx.state === "running" ? (ctx.currentTime - startAt) % duration : -1;
+    },
+    // Audible: playing and switched on.
+    get audible() {
+      return on && !!duration && !!ctx && ctx.state === "running";
     },
     // Playing (not waiting for a gesture, nor off).
     get running() {

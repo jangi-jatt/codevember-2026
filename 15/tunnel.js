@@ -7,7 +7,7 @@ import { globalUniforms } from "modules/pipeline/uniforms.js";
 import { PipelineMaterial } from "modules/pipeline/PipelineMaterial.js";
 import { applyEnvironment, computeSH } from "modules/pipeline/studio.js";
 
-export const TUNNEL_STYLES = ["tiles", "rings", "hex", "grid"];
+export const TUNNEL_STYLES = ["tiles", "rings", "hex", "grid", "laser", "memphis", "suns"];
 const RADIUS = 3.2;
 const NEAR = 400;
 const FAR = -260;
@@ -15,15 +15,17 @@ const FAR = -260;
 const SECTION = 140;
 const BLEND = 60;
 const section = /* glsl */ `
-// The run of styles: a section's style, the next one's, and how far the next has come in (0..1) at s.
-float tStyleOf(float k) { return floor(fract(k * 0.618034 + 0.31) * 4.0); }
+// The styles: the one round the card, the one coming, and how far the new one has come in (0..1) at s. It comes in
+// over BLEND metres past the gate, ahead of the card, and the gate then rushes past.
+uniform float tunnelFrom;
+uniform float tunnelTo;
+uniform float tunnelGate;
 vec3 tStyles(float s) {
-  float k = floor(s / ${SECTION}.0);
-  return vec3(tStyleOf(k), tStyleOf(k + 1.0), smoothstep(${SECTION - BLEND}.0, ${SECTION}.0, s - k * ${SECTION}.0));
+  return vec3(tunnelFrom, tunnelTo, clamp((s - tunnelGate) / ${BLEND}.0, 0.0, 1.0));
 }
 // How far the tube has rolled at s.
 float tRoll(float s) { return tunnelTime * 0.12 + s * 0.006; }
-// The cross-section's radius at angle a, as a share of the tube's: 1 round, a hexagon for the hex style.
+// The cross-section's radius at angle a, as a share of the tube's: round, a hexagon for the hex hall.
 float tSection(float style, float a) {
   if (style != 2.0) return 1.0;
   float k = 6.2831853 / 6.0;
@@ -40,6 +42,20 @@ const float LANES = 24.0;
 const float UNIT = 6.2831853 * RADIUS_T / LANES;
 uniform float tunnelStreaks;
 uniform float tunnelDots;
+uniform float tunnelAutoPulse;
+// Beats: with music the song's (bar * 4 + beat, so bars start on whole multiples of 4), else 130 BPM on the clock.
+uniform float tunnelBeats;
+uniform float tunnelHat;
+// The tunnel's overall brightness (the song's intensity).
+uniform float tunnelGain;
+// How many kicks and hats so far (which cells answer each changes).
+uniform float tunnelKickN;
+uniform float tunnelHatN;
+// How lit the tunnel is (0 dark, 1 full), for the intro.
+uniform float tunnelLight;
+uniform float tunnelKick;
+uniform float tunnelWaveS;
+uniform float tunnelWaveAmp;
 // The angle's screen derivative, without the jump where atan wraps.
 float tAngleWidth(float a) { return min(fwidth(a), fwidth(mod(a + 6.2831853, 6.2831853) - 3.14159265)); }
 float tHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -80,7 +96,9 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     float h = tHash(id);
     float lit = h > 0.2 ? 1.0 : 0.06;
     // Waves of light chase round the tiles in a spiral.
-    float chase = 0.5 + 0.5 * sin(6.2831853 * (id.x / LANES + id.y / 24.0) - tunnelTime * 2.2);
+    // The chase steps round a quarter turn on each beat.
+    float stepB = floor(tunnelBeats) + smoothstep(0.0, 0.35, fract(tunnelBeats));
+    float chase = 0.5 + 0.5 * sin(6.2831853 * (id.x / LANES + id.y / 24.0) - stepB * 1.5707963);
     lit *= 0.45 + 1.1 * chase * chase * chase;
     float glow = mix(tNeon(abs(box), 0.025, w), 0.3, smoothstep(0.15, 0.5, w));
     col = tPalette(floor(id.y / 9.0) + step(0.8, h)) * glow * lit;
@@ -93,7 +111,9 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     float w = ds + blur;
     vec3 ring = mod(k, 2.0) < 1.0 ? vec3(0.12, 0.55, 1.0) : vec3(0.85, 0.15, 1.0);
     // Each ring breathes on its own beat.
-    float beat = 0.55 + 0.45 * sin(tunnelTime * 3.0 + k * 1.7);
+    // Every fourth ring flashes on each beat, the lit set moving down the tunnel beat by beat.
+    float hit = mod(k - floor(tunnelBeats), 4.0) < 0.5 ? smoothstep(0.0, 0.08, fract(tunnelBeats)) * exp(-fract(tunnelBeats) * 3.0) : 0.0;
+    float beat = 0.45 + 0.9 * hit;
     col = ring * mix(tNeon(r, 0.035, w), 0.5, smoothstep(0.6, 2.0, w)) * beat;
     // Fine rings between, and four light strips along the tube.
     float rFine = abs(fract(s / UNIT + 0.5) - 0.5) * UNIT;
@@ -119,13 +139,129 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     col += vec3(0.006, 0.003, 0.018);
     float h = tHash(id + 3.1);
     // A few panels glow from behind, fading in and out.
-    float panel = smoothstep(0.75, 1.0, tHash(id + 5.7)) * (0.5 + 0.5 * sin(tunnelTime * 1.3 + h * 40.0));
+    float panel = smoothstep(0.75, 1.0, tHash(id + 5.7)) * (0.5 + 0.5 * sin(tunnelBeats * 1.5707963 + h * 40.0));
     col += mix(vec3(0.25, 0.1, 0.8), vec3(0.8, 0.2, 0.9), tHash(id + 1.9)) * panel * 0.12 * smoothstep(0.5, 0.3, max(abs(f.x), abs(f.y)));
     if (h < 0.06 && blur == 0.0) {
       vec2 o = (vec2(tHash(id + 7.3), tHash(id + 9.1)) - 0.5) * 0.6;
-      float flicker = 0.6 + 0.4 * sin(tunnelTime * 9.0 + h * 600.0);
+      float flicker = 0.6 + 0.4 * sin(tunnelTime * 9.0 + h * 600.0) + 1.2 * tunnelHat;
       col += vec3(1.0, 0.45, 0.1) * exp(-dot(f - o, f - o) / 0.004) * 6.0 * flicker;
     }
+  } else if (style == 4.0) {
+    // Laser lanes: a thin line down every other lane over a near-black wall, beams of light racing along them on the
+    // beat, and a faint ring every 8 units.
+    float u = a / 6.2831853 * LANES;
+    float lane = mod(floor(u + 0.5), LANES);
+    float rl = abs(fract(u + 0.5) - 0.5) * UNIT;
+    float w = da * RADIUS_T + blur;
+    float on = mod(lane, 2.0);
+    float h = tHash(vec2(lane, 5.0));
+    vec3 tint = h < 0.5 ? vec3(1.0, 0.12, 0.25) : vec3(0.15, 0.9, 1.0);
+    // Beams: one per lane every 8 units, moving a unit a beat toward the card, staggered by lane.
+    float b = fract((s + tunnelBeats * UNIT * 2.0) / (8.0 * UNIT) + h);
+    float beam = smoothstep(0.0, 0.02, b) * pow(1.0 - b, 6.0);
+    col = tint * mix(tNeon(rl, 0.004, w), 0.05, smoothstep(0.05, 0.2, w)) * on * (0.25 + 2.5 * beam);
+    float rr = abs(fract(s / (8.0 * UNIT) + 0.5) - 0.5) * 8.0 * UNIT;
+    col += vec3(0.5, 0.2, 1.0) * mix(tNeon(rr, 0.006, ds + blur), 0.03, smoothstep(0.1, 0.4, ds + blur)) * 0.25;
+    col += vec3(0.004, 0.002, 0.012);
+  } else if (style == 5.0) {
+    // Memphis: 80s shapes scattered one to each 3 x 3 block of cells over a faint grid: gradient discs, pink triangles,
+    // yellow zigzags, outlined squares and hexagons, striped discs. Each turns a little on the beat.
+    vec2 g = vec2(a / 6.2831853 * LANES, s / UNIT);
+    vec2 gd = min(fract(g), 1.0 - fract(g));
+    float w = max(da * RADIUS_T, ds) + blur;
+    col = vec3(0.25, 0.1, 0.5) * (1.0 - smoothstep(0.0, 0.02 + w / UNIT, min(gd.x, gd.y))) * 0.25;
+    vec2 uv = g / 3.0;
+    vec2 id = vec2(mod(floor(uv.x), LANES / 3.0), floor(uv.y));
+    vec2 h2 = vec2(tHash(id + 1.7), tHash(id + 8.3));
+    float kind = floor(tHash(id + 5.1) * 6.0);
+    float B = 3.0 * UNIT;
+    vec2 p = (fract(uv) - 0.5 - (h2 - 0.5) * 0.12) * B;
+    float ang = h2.x * 6.2831853 + (floor(tunnelBeats) + smoothstep(0.0, 0.3, fract(tunnelBeats))) * (h2.y - 0.5) * 0.6;
+    p = mat2(cos(ang), -sin(ang), sin(ang), cos(ang)) * p;
+    float R = 0.32 * B;
+    vec3 cyan = vec3(0.05, 0.85, 1.0), magenta = vec3(1.0, 0.1, 0.85), yellow = vec3(1.0, 0.9, 0.15), purple = vec3(0.45, 0.15, 1.0), orange = vec3(1.0, 0.55, 0.05);
+    float fill = 0.0, line = 0.0;
+    vec3 tint = cyan;
+    if (kind < 1.0) {
+      // A disc, cyan to purple.
+      fill = 1.0 - smoothstep(-w, w, length(p) - R);
+      tint = mix(purple, cyan, clamp(0.5 - p.y / R * 0.6, 0.0, 1.0));
+    } else if (kind < 2.0) {
+      // A triangle, pink.
+      vec2 q = p / R;
+      q.x = abs(q.x);
+      float sd = max(q.x * 0.866 + q.y * 0.5, -q.y) - 0.5;
+      fill = 1.0 - smoothstep(-w / R, w / R, sd);
+      tint = mix(magenta, vec3(1.0, 0.5, 0.9), clamp(0.5 + p.y / R, 0.0, 1.0));
+    } else if (kind < 3.0) {
+      // A zigzag, yellow.
+      float zig = (abs(fract(p.x / (0.28 * R) * 0.5) - 0.5) * 2.0 - 0.5) * 0.35 * R;
+      line = (1.0 - smoothstep(0.035 * R, 0.035 * R + w, abs(p.y - zig))) * step(abs(p.x), 1.1 * R);
+      tint = yellow;
+    } else if (kind < 4.0) {
+      // An outlined square, cyan.
+      vec2 q = abs(p) - R * 0.85;
+      line = 1.0 - smoothstep(0.02 * R, 0.02 * R + w, abs(max(q.x, q.y)));
+      tint = cyan;
+    } else if (kind < 5.0) {
+      // A striped disc, pink or yellow.
+      float inside = 1.0 - smoothstep(-w, w, length(p) - R * 0.9);
+      float stripe = smoothstep(0.45, 0.55, abs(fract(p.y / (0.22 * R)) - 0.5) * 2.0);
+      fill = inside * stripe;
+      tint = h2.y < 0.5 ? magenta : yellow;
+    } else {
+      // An outlined hexagon, orange.
+      vec2 q = abs(p);
+      float hex = max(q.x * 0.866 + q.y * 0.5, q.y) - R;
+      line = 1.0 - smoothstep(0.035 * R, 0.035 * R + w, abs(hex));
+      tint = orange;
+    }
+    col += tint * (fill * 0.9 + line * 2.2);
+    col += vec3(0.005, 0.002, 0.014);
+  } else if (style == 6.0) {
+    // Retro suns: one to each 2 x 2 block, a sunset disc, a downward triangle or a square, in a two-colour gradient,
+    // its lower half cut into stripes that widen toward the bottom; the stripes slide down on the beat.
+    vec2 uv = vec2(a / 6.2831853 * LANES, s / UNIT) / 2.0;
+    vec2 id = vec2(mod(floor(uv.x), LANES / 2.0), floor(uv.y));
+    float B = 2.0 * UNIT;
+    // Up is away from the card, down the tunnel.
+    vec2 p = (fract(uv) - 0.5) * B;
+    float h = tHash(id + 4.4), hk = tHash(id + 7.9), hc = tHash(id + 2.2);
+    float w = max(da * RADIUS_T, ds) + blur;
+    float R = 0.3 * B;
+    float kind = floor(hk * 3.0);
+    float sd;
+    if (kind < 1.0) sd = length(p) - R;
+    else if (kind < 2.0) {
+      vec2 q = vec2(abs(p.x), p.y) / R;
+      sd = max(q.x * 0.894 - q.y * 0.447 - 0.447, q.y - 0.8) * R;
+    } else {
+      vec2 q = abs(p) - R * 0.85;
+      sd = max(q.x, q.y);
+    }
+    float fill = 1.0 - smoothstep(-w, w, sd);
+    float v = clamp(0.5 - p.y / (2.0 * R), 0.0, 1.0);
+    float slide = fract(tunnelBeats * 0.5) * 0.12;
+    float cut = smoothstep(0.42, 1.0, v);
+    float bands = fract((v + slide) / 0.12);
+    // Stripes fade to their average where they'd be finer than a few pixels.
+    float fine = smoothstep(0.2, 0.45, w / (2.0 * R * 0.12));
+    fill *= mix(1.0 - step(bands, cut * 0.7) * step(0.42, v), 1.0 - cut * 0.5, fine);
+    vec3 c0, c1;
+    float pk = floor(hc * 6.0);
+    if (pk < 1.0) { c0 = vec3(1.0, 0.55, 0.1); c1 = vec3(1.0, 0.1, 0.3); }
+    else if (pk < 2.0) { c0 = vec3(1.0, 0.15, 0.4); c1 = vec3(0.35, 0.15, 0.7); }
+    else if (pk < 3.0) { c0 = vec3(1.0, 0.8, 0.2); c1 = vec3(1.0, 0.2, 0.55); }
+    else if (pk < 4.0) { c0 = vec3(0.45, 0.2, 0.75); c1 = vec3(0.1, 0.7, 1.0); }
+    else if (pk < 5.0) { c0 = vec3(0.4, 0.75, 1.0); c1 = vec3(1.0, 0.3, 0.65); }
+    else { c0 = vec3(0.1, 0.4, 1.0); c1 = vec3(1.0, 0.25, 0.4); }
+    vec3 grad = mix(c0, c1, v);
+    float lit = h > 0.12 ? 1.0 : 0.15;
+    float breathe = 0.85 + 0.15 * sin((tunnelBeats + h * 4.0) * 1.5707963);
+    col = grad * grad * fill * 0.6 * lit * breathe;
+    // The sun's glow round it.
+    if (kind < 1.0) col += mix(c0, c1, 0.5) * exp(-max(sd, 0.0) / (0.12 * B)) * 0.12 * lit * (1.0 - fill);
+    col += vec3(0.006, 0.003, 0.016);
   } else {
     // The synthwave grid: lines along and round the tube, magenta to cyan round it.
     vec2 uv = vec2(a / 6.2831853 * LANES, s / UNIT);
@@ -136,15 +272,18 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     vec3 tint = mix(vec3(1.0, 0.1, 0.65), vec3(0.1, 0.85, 1.0), 0.5 + 0.5 * sin(a * 2.0 + s * 0.03));
     // Every fourth ring a bright one, and a scan of light sweeping round the tube.
     float major = 1.0 + 1.5 * step(mod(floor(uv.y + 0.5), 4.0), 0.5) * (1.0 - smoothstep(0.02, 0.02 + 1.5 * w, dd.y));
-    float sweep = pow(0.5 + 0.5 * cos(a - tunnelTime * 1.5 + s * 0.05), 12.0);
+    // The scan goes round once a bar.
+    float sweep = pow(0.5 + 0.5 * cos(a - tunnelBeats * 1.5707963 + s * 0.05), 12.0);
     col = tint * lines * (1.6 + 2.4 * sweep) * major + vec3(0.012, 0.0, 0.025) + tint * sweep * 0.05;
   }
-  // Pulses of light racing toward the card, faster than the wall.
+  // Pulses of light racing toward the card, faster than the wall (on their own beat, without music).
   float wave = fract(s / 60.0 + tunnelTime * 0.45);
-  float pulse = exp(-pow((wave - 0.5) * 20.0, 2.0));
-  col *= 1.0 + 1.6 * pulse;
+  float pulse = exp(-pow((wave - 0.5) * 20.0, 2.0)) * tunnelAutoPulse;
+  // With music: each kick flashes the walls and sends a ring of light away down the tunnel.
+  float ring = exp(-pow((s - tunnelWaveS) / 2.5, 2.0)) * tunnelWaveAmp;
+  col *= (1.0 + 1.6 * pulse + 2.2 * ring + 0.7 * tunnelKick) * tunnelGain;
   // Down the tunnel (and back up it, behind the card) it fades into a coloured haze.
-  vec3 haze = style == 0.0 ? vec3(0.5, 0.08, 0.2) : style == 1.0 ? vec3(0.15, 0.08, 0.5) : style == 2.0 ? vec3(0.25, 0.08, 0.45) : vec3(0.45, 0.06, 0.35);
+  vec3 haze = style == 0.0 ? vec3(0.5, 0.08, 0.2) : style == 1.0 ? vec3(0.15, 0.08, 0.5) : style == 2.0 ? vec3(0.25, 0.08, 0.45) : style == 4.0 ? vec3(0.4, 0.05, 0.15) : style == 5.0 ? vec3(0.4, 0.15, 0.35) : style == 6.0 ? vec3(0.1, 0.15, 0.5) : vec3(0.45, 0.06, 0.35);
   float far = exp(-abs(d) / 45.0);
   return col * far + haze * (1.0 - far) * 0.08 * smoothstep(0.0, 30.0, abs(d));
 }
@@ -182,7 +321,7 @@ vec3 tDots(float a, float s, float da, float ds, float blur) {
   float w = max(ds, da * RADIUS_T) + blur;
   vec3 tint = 0.5 + 0.5 * cos(6.2831853 * (k * 0.045 + vec3(0.0, 0.33, 0.67)));
   tint = mix(tint, vec3(1.0, 0.15, 0.7), 0.35);
-  float twinkle = 0.6 + 0.4 * sin(tunnelTime * 4.0 + k * 0.9 + floor(u) * 2.4);
+  float twinkle = 0.6 + 0.4 * sin(tunnelBeats * 3.1415927 + k * 0.9 + floor(u) * 2.4) + tunnelHat;
   return tint * mix(tNeon(r, 0.04, w), 0.15, smoothstep(0.15, 0.45, w)) * twinkle;
 }
 
@@ -204,6 +343,11 @@ vec3 tunnelBlendAt(float a, float s, float d, float blur, float da, float ds) {
     float front = m * exp(-age * 25.0) * 2.0;
     col = col * (1.0 - m) * (1.0 - 0.5 * front) + next * (m + 0.8 * front);
   }
+  // The cells answer the music: a scatter of them flashes on each kick, fewer sparkle on the hats.
+  vec2 cell = vec2(mod(floor(ar / 6.2831853 * LANES), LANES), floor(s / UNIT));
+  float kickHit = step(tHash(cell + tunnelKickN * 1.371), 0.16) * tunnelKick;
+  float hatHit = step(tHash(cell * 1.31 + tunnelHatN * 2.113), 0.05) * tunnelHat;
+  col *= 1.0 + 3.0 * kickHit + 2.0 * hatHit;
   float far = exp(-abs(d) / 45.0);
   if (tunnelStreaks > 0.001) col += tStreaks(ar, s, da, blur) * tunnelStreaks * far;
   if (tunnelDots > 0.001) col += tDots(ar, s, da, ds, blur) * tunnelDots * far;
@@ -262,13 +406,11 @@ function tube(radial, rings) {
   return geometry;
 }
 
-// The style at s (metres down the tunnel), as the shaders pick it: whichever of the two is more in.
-function styleAt(s) {
-  const of = (k) => Math.floor(((((k * 0.618034 + 0.31) % 1) + 1) % 1) * TUNNEL_STYLES.length);
-  const k = Math.floor(s / SECTION);
-  const f = s - k * SECTION;
-  return f > SECTION - BLEND / 2 ? of(k + 1) : of(k);
-}
+// The styles from least to most going on: sparse rings, laser lanes, the grid, retro suns, the hex hall, the dense tiles,
+// Memphis shapes.
+export const TUNNEL_BY_INTENSITY = ["rings", "laser", "grid", "suns", "hex", "tiles", "memphis"];
+// How far ahead of the card a new style starts coming in (metres).
+const AHEAD = 50;
 
 export function createTunnel(renderer) {
   const uniforms = {
@@ -277,6 +419,19 @@ export function createTunnel(renderer) {
     tunnelTime: { value: 0 },
     tunnelStreaks: { value: 0 },
     tunnelDots: { value: 0 },
+    tunnelAutoPulse: { value: 1 },
+    tunnelFrom: { value: 0 },
+    tunnelTo: { value: 0 },
+    tunnelGate: { value: -1e9 },
+    tunnelBeats: { value: 0 },
+    tunnelHat: { value: 0 },
+    tunnelGain: { value: 1 },
+    tunnelKickN: { value: 0 },
+    tunnelHatN: { value: 0 },
+    tunnelLight: { value: 1 },
+    tunnelKick: { value: 0 },
+    tunnelWaveS: { value: -1e4 },
+    tunnelWaveAmp: { value: 0 },
     tunnelBlurLen: { value: 0 },
   };
   const material = new PipelineMaterial({
@@ -293,7 +448,7 @@ export function createTunnel(renderer) {
       void surface(inout Surface s) {
         s.albedo = vec3(0.0);
         s.roughness = 1.0;
-        s.emissive = tunnelBlendMoving(atan(vTube.y, vTube.x), vTube.z, vTube.z - tunnelTravel, tunnelBlurLen);
+        s.emissive = tunnelBlendMoving(atan(vTube.y, vTube.x), vTube.z, vTube.z - tunnelTravel, tunnelBlurLen) * tunnelLight;
       }
     `,
   });
@@ -319,9 +474,20 @@ export function createTunnel(renderer) {
       u.tunnelTravel.value += dt * speed;
       u.tunnelBlurLen.value = speed * shutter;
       u.tunnelTime.value += dt;
+      if (!this.beatsFromMusic) u.tunnelBeats.value += dt * (130 / 60);
       u.tunnelBend.value = bendAmount;
+      // Without a director (music), a new style every SECTION metres, in a fixed shuffle.
+      if (!this.directed) {
+        const k = Math.floor(u.tunnelTravel.value / SECTION);
+        if (k !== this.sectionK) {
+          this.sectionK = k;
+          this.setStyle(TUNNEL_STYLES[Math.floor(((((k * 0.618034 + 0.31) % 1) + 1) % 1) * TUNNEL_STYLES.length)]);
+        }
+      }
+      // Once the gate is far behind, the new style is the whole tunnel.
+      if (u.tunnelTravel.value > u.tunnelGate.value + BLEND + 60) u.tunnelFrom.value = u.tunnelTo.value;
       // The ambient light follows the style round the card.
-      const here = styleAt(u.tunnelTravel.value);
+      const here = u.tunnelTravel.value > u.tunnelGate.value + BLEND / 2 ? u.tunnelTo.value : u.tunnelFrom.value;
       if (here !== envStyle) env.bake((envStyle = here));
       env.update();
     },
@@ -337,6 +503,33 @@ export function createTunnel(renderer) {
     jump(travel) {
       uniforms.tunnelTravel.value = travel;
     },
+    // The style the tunnel is turning into (or is).
+    get style() {
+      return TUNNEL_STYLES[uniforms.tunnelTo.value];
+    },
+    // Still changing: the new style hasn't yet reached the card.
+    get changing() {
+      return uniforms.tunnelTravel.value < uniforms.tunnelGate.value + BLEND;
+    },
+    // Sends a style down the tunnel from ahead (now: switches at once).
+    // centreIn: metres the card will travel before it is half way through the change (default: AHEAD + BLEND / 2).
+    setStyle(name, now = false, centreIn = AHEAD + BLEND / 2) {
+      const u = uniforms;
+      const style = Math.max(0, TUNNEL_STYLES.indexOf(name));
+      if (style === u.tunnelTo.value && !now) return;
+      if (now) {
+        u.tunnelFrom.value = u.tunnelTo.value = style;
+        u.tunnelGate.value = -1e9;
+        return;
+      }
+      // What the card is in becomes the old style; the new one comes from ahead.
+      if (u.tunnelTravel.value >= u.tunnelGate.value + BLEND / 2) u.tunnelFrom.value = u.tunnelTo.value;
+      u.tunnelTo.value = style;
+      u.tunnelGate.value = u.tunnelTravel.value + Math.max(centreIn - BLEND / 2, 5);
+    },
+    // Who picks the styles: false, the travel (a new one every SECTION metres); true, the caller (setStyle).
+    directed: false,
+    sectionK: null,
   };
 }
 
@@ -361,7 +554,7 @@ function createEnvironmentBaker(renderer, live) {
     side: BackSide,
     uniforms: live,
     vertexShader: `out vec3 vTube;\n${bend}\nvoid main() { vec3 n = normal; vTube = vec3(position.xy, tunnelTravel - position.z); gl_Position = projectionMatrix * modelViewMatrix * vec4(displace(position, n), 1.0); }`,
-    fragmentShader: `uniform float tunnelTravel; uniform float tunnelTime; in vec3 vTube; out vec4 o;\n${wall}\nvoid main() { o = vec4(tunnelBlend(atan(vTube.y, vTube.x), vTube.z, vTube.z - tunnelTravel, 0.03), 1.0); }`,
+    fragmentShader: `uniform float tunnelTravel; uniform float tunnelTime; in vec3 vTube; out vec4 o;\n${wall}\nvoid main() { o = vec4(tunnelBlend(atan(vTube.y, vTube.x), vTube.z, vTube.z - tunnelTravel, 0.03) * tunnelLight, 1.0); }`,
   });
   liveScene.add(new Mesh(tube(96, 260), liveMaterial));
   const cube = new WebGLCubeRenderTarget(128, { type: HalfFloatType });

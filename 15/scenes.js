@@ -3,11 +3,12 @@
 // userData.surf: metalness, roughness, albedo, per mesh.
 import { BufferGeometry, Float32BufferAttribute, BufferAttribute, Group, Mesh, LatheGeometry, Vector2, Vector3, Quaternion, TorusKnotGeometry, TorusGeometry, IcosahedronGeometry, BoxGeometry, CylinderGeometry } from "three";
 import { mergeVertices } from "third_party/BufferGeometryUtils.js";
+import { RoundedBoxGeometry } from "third_party/three-rounded-box.js";
 import { suzanneGeometry } from "modules/suzanne/suzanneMesh.js";
 import { getSolid, families } from "modules/polyhedra/solids.js";
 import * as gearLib from "../11/gears.js";
 
-export const LIGHT_SCENES = ["head", "crystals", "gear", "chess", "knot", "atom"];
+export const LIGHT_SCENES = ["head", "crystals", "gear", "chess", "knot", "atom", "cube"];
 
 const mulberry = (a) => () => {
   a = (a + 0x6d2b79f5) | 0;
@@ -92,21 +93,38 @@ function crystals(r, group) {
   }
 }
 
-// One big gear with pinions meshing round it, a little forward and back.
+// One big gear with pinions meshing round it; each pinion is a compound gear, a second wheel on its shaft standing
+// out in front or behind, so the train has depth. Seen in three-quarter view.
 function gear(r, group) {
   const m = 0.03;
+  const train = new Group();
   const big = gearLib.spurGear({ teeth: 40 + Math.floor(r() * 12), module: m, width: m * 6, bore: m * 3, hub: m * 6, style: ["spokes", "holes", "web"][Math.floor(r() * 3)], seed: Math.floor(r() * 1e6), chamfer: 0.18 * m });
-  add(group, gearGeometry(big), SHINY);
+  add(train, gearGeometry(big), SHINY);
+  // The big gear's shaft.
+  add(train, new CylinderGeometry(m * 2.2, m * 2.2, m * 26, 24).rotateX(Math.PI / 2), SATIN);
   const count = 3 + Math.floor(r() * 3);
   for (let k = 0; k < count; k++) {
     const teeth = 10 + Math.floor(r() * 10);
     const pinion = gearLib.spurGear({ teeth, module: m, width: m * (6 + 4 * r()), bore: m * 1.5, hub: m * 2.5, style: "solid", seed: Math.floor(r() * 1e6), chamfer: 0.18 * m });
     const pair = gearLib.meshSpur(big, pinion, (k / count) * Math.PI * 2 + r() * 0.4);
-    const mesh = add(group, gearGeometry(pinion), r() < 0.5 ? SHINY : SATIN);
-    mesh.applyMatrix4(pair.transform);
+    const axle = new Group();
+    axle.applyMatrix4(pair.transform);
+    const mesh = add(axle, gearGeometry(pinion), r() < 0.5 ? SHINY : SATIN);
     mesh.rotation.z = pair.phase;
-    mesh.position.z = (r() - 0.5) * m * 4;
+    // The compound wheel, out along the shaft.
+    const side = r() < 0.5 ? 1 : -1;
+    const reach = m * (10 + 8 * r());
+    const wheel = gearLib.spurGear({ teeth: 16 + Math.floor(r() * 20), module: m * 0.8, width: m * 5, bore: m * 1.5, hub: m * 2.5, style: r() < 0.5 ? "web" : "holes", seed: Math.floor(r() * 1e6), chamfer: 0.15 * m });
+    const w = add(axle, gearGeometry(wheel), r() < 0.5 ? SATIN : SHINY);
+    w.position.z = side * reach;
+    w.rotation.z = r() * 6.3;
+    const shaft = add(axle, new CylinderGeometry(m * 1.2, m * 1.2, reach + m * 6, 16).rotateX(Math.PI / 2), SATIN);
+    shaft.position.z = side * reach * 0.5;
+    train.add(axle);
   }
+  // Three-quarter view: turned and tipped toward the viewer.
+  train.rotation.set(-0.5 + 0.15 * r(), (r() < 0.5 ? -1 : 1) * (0.7 + 0.2 * r()), 0.2 * (r() - 0.5));
+  group.add(train);
 }
 
 // Turned pieces (a profile spun round), standing on a board of squares.
@@ -175,7 +193,47 @@ function atom(r, group) {
   }
 }
 
-const BUILDERS = { head, crystals, gear, chess, knot, atom };
+// A Rubik's cube caught mid-turn: 26 rounded cubies with their stickers (each face's colour as a grey, which is all a
+// hologram keeps), one layer twisted part way, the whole seen corner-on.
+const STICKER_GREYS = [0.95, 0.7, 0.55, 0.4, 0.82, 0.28];
+function cube(r, group) {
+  const cubie = new RoundedBoxGeometry(0.3, 0.3, 0.3, 3, 0.04);
+  const sticker = new RoundedBoxGeometry(0.24, 0.24, 0.02, 2, 0.03);
+  const body = new Group();
+  const twist = new Group();
+  const axis = Math.floor(r() * 3);
+  const layer = r() < 0.5 ? -1 : 1;
+  const faces = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]];
+  for (let x = -1; x <= 1; x++) {
+    for (let y = -1; y <= 1; y++) {
+      for (let z = -1; z <= 1; z++) {
+        if (!x && !y && !z) continue;
+        const at = [x, y, z];
+        const parent = at[axis] === layer ? twist : body;
+        add(parent, cubie, [0.0, 0.5, 0.05], { position: new Vector3(x, y, z).multiplyScalar(0.31) });
+        faces.forEach((n, fi) => {
+          if (n[0] && n[0] !== x) return;
+          if (n[1] && n[1] !== y) return;
+          if (n[2] && n[2] !== z) return;
+          const nv = new Vector3(...n);
+          const q = new Quaternion().setFromUnitVectors(new Vector3(0, 0, 1), nv);
+          // Scrambled: each sticker one of the six greys, its face's most often.
+          const g = r() < 0.55 ? STICKER_GREYS[fi] : STICKER_GREYS[Math.floor(r() * 6)];
+          add(parent, sticker, [0.0, 0.25, g], { position: new Vector3(x, y, z).multiplyScalar(0.31).addScaledVector(nv, 0.152), quaternion: q });
+        });
+      }
+    }
+  }
+  const ax = new Vector3(axis === 0 ? 1 : 0, axis === 1 ? 1 : 0, axis === 2 ? 1 : 0);
+  twist.quaternion.setFromAxisAngle(ax, (r() < 0.5 ? -1 : 1) * (0.35 + 0.35 * r()));
+  body.add(twist);
+  // Corner-on, three faces showing.
+  body.rotation.set(0.55 + 0.15 * r(), 0.75 + 0.15 * (r() - 0.5), 0.1 * (r() - 0.5));
+  body.scale.setScalar(1.15);
+  group.add(body);
+}
+
+const BUILDERS = { head, crystals, gear, chess, knot, atom, cube };
 
 export async function buildLightScene(kind, seed) {
   const r = mulberry(seed * 2654435761 + kind.length * 97);

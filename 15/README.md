@@ -30,13 +30,24 @@ Notable:
 - The trading card has prismatic foil, glitter and a white stock edge; the glass plate has green edges. Both carry
   real fingerprint scans as grease (after genuary-2026 day 6) and fine wear.
 - The tunnel is one tube, bent in its vertex shader: straight at the card, it winds away by how far the path ahead has
-  turned, and it slowly rolls. Its wall runs through four neon styles (tiles, rings, a hexagonal hall with embers, a
-  synthwave grid), with optional overlays on top (light-speed streaks, a turning dot spiral), one per 140 m section: over the last 60 m of each, the next style replaces it tile by tile on a
-  lattice all styles share (24 lanes round, a lane's width along), in an ordered dither, each tile flaring as it comes
-  in, and the tube's shape blends into the next one's. The walls animate (pulses racing down, chasing tiles, breathing
-  rings, drifting embers, a sweeping scan). The glass and foil reflect the tunnel as it is: rendered round the card into
-  a cube each frame and prefiltered; each style's ambient light is baked once.
+  turned, and it slowly rolls. Its wall is one of seven neon styles, from plainest to busiest: rings, laser lanes with beams
+  on the beat, a synthwave grid, big breathing discs, a hexagonal hall with embers, tiles, winding Truchet paths. With
+  the music a scatter of cells flashes on each kick and a few sparkle on the hats. A new style comes in from ahead tile by tile on a lattice all styles share (24 lanes
+  round, a lane's width along). With the music the plainest plays the
+  opening 12 s, then the style follows how hectic the song is (batec's curve, spread over the song's own range), holding
+  each for at least 4 bars, and as it gets more hectic the light-speed streaks and then the dot spiral layer on top; without it, a new style every 140 m. The glass and foil reflect the tunnel as it is:
+  rendered round the card into a cube each frame and prefiltered; each style's ambient light is baked once.
 - Day 2's burst is built a slice a frame too (its `peelPiecesAsync`), and its shapes are built while the page loads.
 - Each card is its own program, both compiled at load. Loop bounds are uniforms so D3D can't unroll the marches and
   light loops (as one program it compiled for over ten seconds and lost the WebGL context on Windows).
 - The soundtrack (`sound/tunnel.mp3`) loops while the page plays and pauses with it.
+- The scene moves to it, from a beat map made offline with batec (`sound/tunnel.batec.json`, runtime vendored in
+  `third_party/batec/`): the tunnel's animations run on the song's beat (the tiles' chase steps on each beat, rings
+  flash in turn, the grid's scan goes round once a bar, panels and dots pulse, hats flicker the embers and dots), kicks
+  flash it and send rings of light down it, and the low end pushes the
+  speed; the card glides freely, its only move a barrel roll when a new section of the song begins,
+  and hats glint its foil. With music, auto change counts the song's bars ("Change every (bars, with music)", 8 by
+  default): the card spins up a bar before a phrase and the new one lands on its first downbeat; the drop spins one in
+  too. The glide's pace follows the song's mood, its valence times its energy (quiet or sad slower,
+  loud and happy faster). Without music the
+  tunnel keeps its own pulses.

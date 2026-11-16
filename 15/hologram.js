@@ -622,19 +622,19 @@ const fragmentPars = /* glsl */ `
     vec3 Vt = vec3(dot(worldV, Tw), dot(worldV, Bw), max(dot(worldV, Nw), 0.2));
     ChamberLights cl = buildChamberLights(Tw, Bw, Nw, Vt);
     vec2 p = vUv;
-    float f = dot(p, vec2(0.7071, 0.7071)) * 38.0;
-    float band = floor(f);
-    float ga = band * 0.83 + hash21(vec2(band, 3.7)) * 1.4;
-    vec3 col = litFlatGrating(cl, Vt, vec2(cos(ga), sin(ga)), fract(f) * 0.25) * 0.55;
+    // A smooth foil: the grating's direction turns slowly across the card (no engraved bands).
+    float f = dot(p, vec2(0.7071, 0.7071));
+    float ga = f * 5.0 + valueNoise2D(p * 3.0) * 1.2;
+    vec3 col = litFlatGrating(cl, Vt, vec2(cos(ga), sin(ga)), f * 0.6) * 0.45;
     // Glitter: a fraction of fine cells hold a tilted flake.
     vec2 cell = floor(p * 170.0);
     vec2 h = hash22(cell);
-    if (h.x < 0.16) {
+    if (h.x < 0.04) {
       vec3 fn = normalize(vec3((hash22(cell + 3.1) - 0.5) * 1.3, 1.0));
       float glint = 0.0;
       for (int i = 0; i < uFour; i++) glint += pow(max(dot(fn, clHt(cl, i)), 0.0), 140.0) * clPower(cl, i);
       vec2 fp = fract(p * 170.0) - 0.5;
-      col += spectral(420.0 + 280.0 * h.y) * glint * smoothstep(0.5, 0.2, length(fp)) * 3.0;
+      col += spectral(420.0 + 280.0 * h.y) * glint * smoothstep(0.4, 0.1, length(fp)) * 2.0;
     }
     // The raised line round the window.
     float line = 1.0 - smoothstep(0.002, 0.004, abs(sd - 0.009));
@@ -673,14 +673,17 @@ const fragmentPars = /* glsl */ `
     ChamberLights cl = buildChamberLights(Tw, Bw, Nw, Vt);
     vec2 p = vUv - 0.5;
     vec2 hs = vec2(0.5 * uCardAspect, 0.5) - uCardBorder;
-    float aa = max(fwidth(p.x), 1e-4) * 1.2;
+    // Antialiased by the footprint along both axes (a grazing view squeezes one of them).
+    float aa = max(length(fwidth(p)), 1e-4) * 1.2;
+    // Fine type and stars fade out before they get smaller than a couple of pixels, rather than break up.
+    float fine = 1.0 - smoothstep(0.0025, 0.006, aa);
     float ink = 0.0, line = 0.0;
     // Name plate.
     vec2 plateC = vec2(-hs.x * 0.22, hs.y - 0.034);
     float plate = mkBox(p - plateC, vec2(hs.x * 0.72, 0.018), 0.008);
     line = max(line, 1.0 - smoothstep(0.0015, 0.0015 + aa, abs(plate)));
     ink = max(ink, 0.35 * (1.0 - smoothstep(0.0, aa, plate)));
-    ink = max(ink, mkType(vec2(p.x - (-hs.x + 0.03), (hs.y - 0.025) - p.y), hs.x * 0.75, 1.0, 0.018, 1.0));
+    ink = max(ink, fine * mkType(vec2(p.x - (-hs.x + 0.03), (hs.y - 0.025) - p.y), hs.x * 0.75, 1.0, 0.018, 1.0));
     // The emblem at the plate's right: a star in a ring.
     vec2 em = p - vec2(hs.x - 0.04, plateC.y);
     float ring = abs(length(em) - 0.015);
@@ -691,7 +694,7 @@ const fragmentPars = /* glsl */ `
     float box = mkBox(p - boxC, vec2(hs.x - 0.035, 0.038), 0.008);
     line = max(line, 1.0 - smoothstep(0.0015, 0.0015 + aa, abs(box)));
     ink = max(ink, 0.18 * (1.0 - smoothstep(0.0, aa, box)));
-    ink = max(ink, 0.85 * mkType(vec2(p.x - (-hs.x + 0.05), (boxC.y + 0.027) - p.y), 2.0 * hs.x - 0.12, 3.0, 0.018, 3.0));
+    ink = max(ink, 0.85 * fine * mkType(vec2(p.x - (-hs.x + 0.05), (boxC.y + 0.027) - p.y), 2.0 * hs.x - 0.12, 3.0, 0.018, 3.0));
     // Seal, overlapping the box's corner: rings and rays.
     vec2 se = p - vec2(hs.x - 0.05, boxC.y + 0.04);
     float sr = length(se);
@@ -704,13 +707,16 @@ const fragmentPars = /* glsl */ `
     vec2 gc = floor(g);
     vec2 gh = hash22(gc + 17.0);
     float stars = 0.0;
-    if (gh.x < 0.12) stars = 1.0 - smoothstep(0.0, aa * 26.0, mkStar(fract(g) - 0.5 - (gh - 0.5) * 0.3, 0.14 + 0.1 * gh.y));
+    if (gh.x < 0.12) stars = fine * (1.0 - smoothstep(0.0, aa * 26.0, mkStar(fract(g) - 0.5 - (gh - 0.5) * 0.3, 0.14 + 0.1 * gh.y)));
     float a = atan(p.y, p.x);
     vec3 col = litFlatGrating(cl, Vt, vec2(cos(a), sin(a)), 0.0) * (line * 1.4 + ink * 0.9 + seal * 1.6);
     col += litFlatGrating(cl, Vt, normalize(se + 1e-4), sr * 6.0) * sealDisc * 0.35;
     float f = dot(p, vec2(0.6, -0.8)) * 60.0;
     col += litFlatGrating(cl, Vt, vec2(0.6, -0.8), fract(f) * 0.3) * stars * 1.2;
-    float cover = clamp(max(max(line, ink), max(seal, sealDisc * 0.35)), 0.0, 1.0) * (1.0 - smoothstep(-0.004, 0.0, sd));
+    // And all of it softens toward grazing views, where foil shows little anyway.
+    float face = smoothstep(0.15, 0.45, abs(dot(worldV, Nw)));
+    col *= face;
+    float cover = face * clamp(max(max(line, ink), max(seal, sealDisc * 0.35)), 0.0, 1.0) * (1.0 - smoothstep(-0.004, 0.0, sd));
     return vec4(col * (1.0 - smoothstep(-0.004, 0.0, sd)), cover);
   }
 
@@ -1088,7 +1094,7 @@ void surface(inout Surface s) {
       vec3 dpx = dFdx(vWorldPos), dpy = dFdy(vWorldPos);
       vec3 r1 = cross(dpy, s.normal), r2 = cross(s.normal, dpx);
       float det = dot(dpx, r1);
-      float emboss = marks.a * 0.0012 * (1.0 - metal);
+      float emboss = marks.a * 0.0012 * (1.0 - metal) * smoothstep(0.35, 0.6, abs(dot(worldV, s.normal)));
       vec3 grad = sign(det) * (dFdx(emboss) * r1 + dFdy(emboss) * r2);
       s.normal = normalize(abs(det) * s.normal - grad);
       s.emissive = s.emissive * (1.0 - 0.6 * marks.a * (1.0 - metal)) + marks.rgb * ((1.0 - metal) * uFoil * uHoloGain * 2.0);

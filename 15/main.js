@@ -1,15 +1,15 @@
-import { fromDefaults, renderer, camera, controls, render, onResize, onPause, addKey, setRunning, onRandomize, applyUrlState, keysHelp, setDay, showHint, loadingStep, addActionButton, showSoundHint } from "common";
+import { fromDefaults, renderer, camera, controls, render, onResize, onPause, addKey, setRunning, onRandomize, applyUrlState, keysHelp, setDay, showHint, loadingStep, addActionButton, showSoundHint, randomize } from "common";
 import { createMusic } from "./music.js";
-import { GUI } from "guspira";
+import { Track } from "batec/track.js";
+import { GUI, signal } from "guspira";
 import { Scene, Mesh, Group, Vector2, Vector3, Color, MathUtils, Matrix4, Quaternion } from "three";
 import { Pipeline } from "modules/pipeline/Pipeline.js";
-import { createAutoChange } from "modules/autoChange.js";
 import { SHAPE_LIST, buildSurfaceGeometry } from "./geometries.js";
 import { LOOK_PRESETS, createHologramUniforms, createHologramMaterial } from "./hologram.js";
 import { createDiorama, SCENES, braggReplay } from "./diorama.js";
 import { preloadShatterForms } from "./shatter.js";
 import { loadFingerprints, createSmudges } from "./smudge.js";
-import { createTunnel } from "./tunnel.js";
+import { createTunnel, TUNNEL_BY_INTENSITY } from "./tunnel.js";
 import { createCardOver } from "./cardOver.js";
 import { nativeRandom } from "modules/random.js";
 
@@ -54,6 +54,7 @@ const defaults = {
   blur: true,
   auto: true,
   autoTime: 10,
+  changeBars: "8",
 };
 const params = fromDefaults(defaults);
 const load = {
@@ -66,7 +67,8 @@ const load = {
 const pipeline = new Pipeline(renderer, {
   background: BACKGROUND,
   exposure: 1,
-  bloomStrength: 0.22,
+  bloomStrength: 0.3,
+  bloomRadius: 0.82,
   saturation: 1.15,
   vignette: 0.3,
   grain: 0.02,
@@ -93,14 +95,14 @@ randomIn(gui.addSlider("Border", params.border, 0.01, 0.2, 0.005, { visibleWhen:
 randomIn(gui.addSlider("Foil", params.foil, 0, 2, 0.01, { visibleWhen: () => params.shape() === "card" }), params.foil, 1.5, 2, 0.01);
 gui.addSection("Hologram");
 gui.addSlider("Colour (nm)", params.colour, 500, 640, 1);
-randomIn(gui.addSlider("Bandwidth (nm)", params.bandwidth, 0, 200, 1), params.bandwidth, 0, 40, 1);
+randomIn(gui.addSlider("Bandwidth (nm)", params.bandwidth, 0, 200, 1), params.bandwidth, 20, 40, 1);
 gui.addSlider("Swelling", params.swelling, 0, 2, 0.01);
 gui.addSlider("Viewing zone (°)", params.zone, 10, 80, 1, { randomizable: false });
 randomIn(gui.addSlider("Dispersion", params.dispersion, 0, 3, 0.01), params.dispersion, 1.5, 3, 0.01);
 gui.addSelect("Look", params.look, Object.keys(LOOK_PRESETS));
 gui.addSlider("Depth", params.depth, 0.4, 1.6, 0.01);
 gui.addSlider("Brightness", params.brightness, 0.1, 1.5, 0.01, { randomizable: false });
-gui.addSlider("Ghost", params.ghost, 0, 0.3, 0.01);
+randomIn(gui.addSlider("Ghost", params.ghost, 0, 0.3, 0.01), params.ghost, 0.1, 0.3, 0.01);
 gui.addSlider("Grazing distortion", params.graze, 0, 2, 0.01);
 gui.addSection("Rings");
 gui.addSlider("Rings", params.rings, 0, 2, 0.01);
@@ -116,12 +118,57 @@ gui.addSlider("Sway", params.sway, 0, 2, 0.01, { randomizable: false });
 gui.addSlider("Orbit", params.orbit, 0, 2, 0.01, { randomizable: false });
 gui.addSlider("Roll", params.roll, -1, 1, 0.01, { randomizable: false });
 gui.addSection("Tunnel");
-gui.addCheckbox("Light streaks", params.streaks);
-gui.addCheckbox("Dot spiral", params.dots);
+gui.addCheckbox("Light streaks", params.streaks, { randomizable: false });
+gui.addCheckbox("Dot spiral", params.dots, { randomizable: false });
 gui.addSlider("Bend", params.bend, 0, 2, 0.01, { randomizable: false });
 gui.addSlider("Speed (m/s)", params.speed, 0, 40, 0.1, { randomizable: false });
 gui.addCheckbox("Motion blur", params.blur, { randomizable: false });
-const autoChange = createAutoChange({ enabled: params.auto, every: params.autoTime, gui, ready: () => flip.state === "idle" });
+// Auto change, the day's own: with the music it counts the song's bars (in bar() below) and lands each new card on a
+// phrase; without it, seconds of no interaction. Off under ?capture, since recordings drive their own changes.
+const autoChange = (() => {
+  const capture = new URLSearchParams(location.search).has("capture");
+  const status = signal("");
+  let elapsed = 0, held = false;
+  const restart = () => (elapsed = 0);
+  const opts = { capture: true, passive: true };
+  addEventListener("pointerdown", () => ((held = true), restart()), opts);
+  for (const e of ["pointerup", "pointercancel"]) addEventListener(e, () => ((held = false), restart()), opts);
+  for (const e of ["wheel", "keydown"]) addEventListener(e, restart, opts);
+  onPause(restart);
+  gui.addCheckbox("Auto change", params.auto, { randomizable: false });
+  gui.addSelect("Change every (bars, with music)", params.changeBars, ["4", "8", "16", "32"], { randomizable: false });
+  gui.addSlider("Change every (s, no music)", params.autoTime, 5, 60, 1, { randomizable: false });
+  gui.addMonitor("Next change", status);
+  const on = () => params.auto() && !capture;
+  // The card is between changes: settled, or landing after its swap (bars count from the swap).
+  const free = () => (flip.state === "idle" || (flip.state === "landing" && flip.swapped)) && intro.tunnel >= 1;
+  return {
+    on,
+    restart,
+    // Driven by the music's bars instead of the clock.
+    get musical() {
+      return music.audible && !!beat.track;
+    },
+    update(dt) {
+      let text;
+      if (!on()) text = "off";
+      else if (dt === 0) text = "paused";
+      else if (this.musical) {
+        const left = beat.swapBar + Number(params.changeBars()) - (beat.track.state.bar ?? 0);
+        text = flip.state === "idle" || flip.swapped ? `in ${Math.max(1, left)} bar${left > 1 ? "s" : ""}` : "changing";
+        elapsed = 0;
+      } else {
+        elapsed = !held && free() ? elapsed + dt : 0;
+        if (elapsed >= params.autoTime()) {
+          elapsed = 0;
+          randomize();
+        }
+        text = held || !free() ? "waiting" : `in ${Math.max(1, Math.ceil(params.autoTime() - elapsed))} s`;
+      }
+      if (text !== status.peek()) status.set(text);
+    },
+  };
+})();
 pipeline.addGUI(gui);
 // The soundtrack, downloaded while the page loads; M or the button turns it on and off, pausing pauses it.
 const music = createMusic({ onProgress: load.music.set });
@@ -134,6 +181,142 @@ function toggleSound() {
 addKey("KeyM", "toggle sound", toggleSound);
 onPause((running) => music.setPaused(!running));
 showSoundHint(() => !music.running);
+
+// The music's beat map (batec, analysed offline: sound/tunnel.batec.json). While it plays, kicks flash the tunnel and
+// send rings of light down it, the low end pushes the speed, snares jolt the card, downbeats pulse it, and the drop
+// spins in a new card.
+const beat = { track: null, hat: 0, last: -1, kick: 0, waveAt: -1e9, wave: 0, energy: 0, barrel: 1, auto: 1, valence: 0.25, kickShown: 0, hatShown: 0, intensity: 0.5, intenseLo: 0, intenseHi: 1, swapBar: -1e9, hectic: 0, rawHectic: 0, hecticTop: 1, hecticPeak: 1, streaks: 0, dots: 0, hecticLo: 0, hecticHi: 1, tunnelBar: -1e9 };
+const beatMap = fetch(new URL("./sound/tunnel.batec.json", import.meta.url)).then((r) => r.json());
+beatMap.then((map) => {
+  const track = new Track(map);
+  track.on("onset:kick", ({ strength }) => {
+    beat.kick = Math.max(beat.kick, 0.5 + 0.5 * strength);
+    tunnel.uniforms.tunnelKickN.value = (tunnel.uniforms.tunnelKickN.value + 1) % 997;
+    beat.waveAt = tunnel.uniforms.tunnelTravel.value;
+    beat.wave = 0.6 + 0.4 * strength;
+  });
+  // The card glides freely; only a new section of the song (other than the drop, which spins in a new card) gets a
+  // barrel roll.
+  track.on("section", (sec) => {
+    if (!sec.tags?.includes("drop") && beat.barrel >= 1) beat.barrel = 0;
+  });
+  track.on("bar", ({ bar }) => {
+    if (flip.state === "ready") flip.state = "landing";
+    // Counted in the song's own bars from the last swap (frame time drifts against the music); the first card's count
+    // starts when the music does.
+    if (beat.swapBar < -1e8) beat.swapBar = bar;
+    const due = autoChange.on() && intro.tunnel >= 1 && bar - beat.swapBar >= Number(params.changeBars()) - 1;
+    if (due && bar % 4 === 3 && flip.state === "idle") {
+      flip.onBar = true;
+      randomize();
+    }
+  });
+  track.on("onset:hat", ({ strength }) => {
+    beat.hat = Math.max(beat.hat, 0.4 + 0.6 * strength);
+    tunnel.uniforms.tunnelHatN.value = (tunnel.uniforms.tunnelHatN.value + 1) % 997;
+  });
+  track.on("tag:drop", () => {
+    if (autoChange.on() && flip.state === "idle") randomize();
+  });
+  // How hectic the song is, spread over its own range (5th to 95th percentile, so the quiet ends don't squash it).
+  const h = [...(track.map.curves?.hectic ?? [])].filter((v) => v > 0.05).sort((a, b) => a - b);
+  beat.hecticLo = h[Math.floor(h.length * 0.05)] ?? 0;
+  beat.hecticHi = h[Math.floor(h.length * 0.95)] ?? 1;
+  const it = [...(track.map.curves?.intensity ?? [])].filter((v) => v > 0.05).sort((a, b) => a - b);
+  beat.intenseLo = it[Math.floor(it.length * 0.05)] ?? 0;
+  beat.intenseHi = it[Math.floor(it.length * 0.95)] ?? 1;
+  // The song's most hectic stretches: its top quarter, and its top tenth.
+  beat.hecticTop = h[Math.floor(h.length * 0.75)] ?? 1;
+  beat.hecticPeak = h[Math.floor(h.length * 0.9)] ?? 1;
+  beat.track = track;
+}, (e) => console.warn("no beat map", e));
+// The intro: the card fades in out of the dark, then the tunnel lights up as the music starts. It waits for the music
+// (or for sound to be switched off, or for it to fail); recordings and replayed moments start fully lit.
+const quickStart = new URLSearchParams(location.search).has("capture") || new URLSearchParams(location.search).has("state");
+const intro = { card: quickStart ? 1 : 0, tunnel: quickStart ? 1 : 0, lit: quickStart };
+let musicFailed = false;
+music.loaded.catch(() => (musicFailed = true));
+function updateIntro(dt) {
+  // Frames, not the time since load: the first frame's dt can span the whole load.
+  dt = Math.min(dt, 1 / 30);
+  // Exposure only while fading in, so the panel's slider still works after.
+  if (intro.card < 1) {
+    intro.card = Math.min(1, intro.card + dt / 1.8);
+    pipeline.exposure = intro.card * intro.card * (3 - 2 * intro.card);
+  }
+  if (!intro.lit && intro.card >= 1 && (music.audible || !music.enabled || musicFailed)) intro.lit = true;
+  if (intro.lit) intro.tunnel = Math.min(1, intro.tunnel + dt / 2.5);
+  const e = (x) => x * x * (3 - 2 * x);
+  tunnel.uniforms.tunnelLight.value = e(intro.tunnel) ** 2;
+}
+// With the music, the tunnel's style follows how hectic the song is: the plainest (rings) for the opening 12 s, then on
+// each 8-bar phrase (half way in as it starts) one of the three styles at or just under the song's hectic level right now, never the one before.
+function pickTunnel(t, st) {
+  const first = !tunnel.directed;
+  if (t < 12) {
+    if (tunnel.style !== TUNNEL_BY_INTENSITY[0]) tunnel.setStyle(TUNNEL_BY_INTENSITY[0], first);
+    return;
+  }
+  const h = MathUtils.clamp(((st.character?.hectic ?? 0) - beat.hecticLo) / Math.max(beat.hecticHi - beat.hecticLo, 1e-3), 0, 1);
+  beat.hectic += (h - beat.hectic) * 0.02;
+  // The light-speed streaks layer on in the song's most hectic quarter, the dot spiral in its most hectic tenth.
+  const raw = st.character?.hectic ?? 0;
+  beat.rawHectic += (raw - beat.rawHectic) * 0.02;
+  beat.streaks = MathUtils.smoothstep(beat.rawHectic, beat.hecticTop - 0.01, beat.hecticTop + 0.02);
+  beat.dots = MathUtils.smoothstep(beat.rawHectic, beat.hecticPeak - 0.005, beat.hecticPeak + 0.015);
+  // Decided two bars before the phrase, and sent down the tunnel so the card is half way through it on the phrase.
+  if (tunnel.changing || st.bar === beat.tunnelBar || st.bar % 8 !== 6) return;
+  const n = TUNNEL_BY_INTENSITY.length;
+  const top = Math.round(beat.hectic * (n - 1));
+  const now = TUNNEL_BY_INTENSITY.indexOf(tunnel.style);
+  // A fixed pick per phrase (the same song plays the same way), stepping past the current style.
+  let pick = MathUtils.clamp(top - Math.floor(((Math.sin((st.bar + 2) * 12.9898) * 43758.5453) % 1 + 1) % 1 * 3), 0, n - 1);
+  if (pick === now) pick = pick === top ? Math.max(0, pick - 1) : pick + 1;
+  beat.tunnelBar = st.bar;
+  const lead = (8 - (st.beatInBar + st.beatPhase)) * (60 / (st.bpm || 130));
+  const speed = params.speed() * (1 + 0.35 * beat.energy * (1 - beat.auto));
+  tunnel.setStyle(TUNNEL_BY_INTENSITY[pick], first, speed * lead);
+}
+function updateBeat(dt) {
+  const k = (rate) => Math.exp(-rate * dt);
+  const t = music.audible ? music.time : -1;
+  if (beat.track && t >= 0) {
+    // The track loops: a jump back is a seek, not a run of events.
+    if (t < beat.last) {
+      beat.track.seek(t);
+    }
+    const st = beat.track.update(t);
+    beat.energy += ((st.energy?.low ?? 0) - beat.energy) * (1 - k(4));
+    // Mood: the song's valence times its energy right now (happy and loud glides fastest).
+    beat.valence += ((st.character?.valence ?? 0.5) * (st.character?.energy ?? 0.5) - beat.valence) * (1 - k(0.5));
+    tunnel.uniforms.tunnelBeats.value = st.bar * 4 + st.beatInBar + st.beatPhase;
+    pickTunnel(t, st);
+    beat.last = t;
+  } else beat.last = -1;
+  beat.auto += ((t >= 0 && beat.track ? 0 : 1) - beat.auto) * (1 - k(2));
+  tunnel.beatsFromMusic = t >= 0 && !!beat.track;
+  tunnel.directed = tunnel.beatsFromMusic;
+  if (!tunnel.directed) beat.streaks = beat.dots = 0;
+  // Hits ease in over a few hundredths of a second and out over a few tenths, rather than switch.
+  beat.kick *= k(5);
+  beat.hat *= k(8);
+  beat.kickShown += (beat.kick - beat.kickShown) * (1 - k(beat.kick > beat.kickShown ? 30 : 12));
+  beat.hatShown += (beat.hat - beat.hatShown) * (1 - k(beat.hat > beat.hatShown ? 35 : 14));
+  tunnel.uniforms.tunnelHat.value = beat.hatShown * (1 - beat.auto);
+  // The louder and busier the song, the brighter the whole tunnel burns (and blooms).
+  const intensity = MathUtils.clamp(((beat.track && t >= 0 ? beat.track.state.character?.intensity : 0) - beat.intenseLo) / Math.max(beat.intenseHi - beat.intenseLo, 1e-3), 0, 1);
+  beat.intensity += ((beat.auto > 0.5 ? 0.5 : intensity) - beat.intensity) * (1 - k(0.8));
+  tunnel.uniforms.tunnelGain.value = 0.8 + 0.9 * beat.intensity * beat.intensity;
+  if (!music.audible && flip.state === "ready") flip.state = "landing";
+  beat.wave *= k(1.2);
+  beat.barrel = Math.min(1, beat.barrel + dt / 1.6);
+  const u = tunnel.uniforms;
+  u.tunnelAutoPulse.value = beat.auto;
+  u.tunnelKick.value = beat.kickShown;
+  // The ring rides away from the card, down the tunnel, faster than the wall comes.
+  u.tunnelWaveS.value = beat.waveAt + (u.tunnelTravel.value - beat.waveAt) * 4;
+  u.tunnelWaveAmp.value = beat.wave;
+}
 showHint("Drag to spin the card · move the pointer to light it · R for a new card", "Drag to spin the card · tap {randomize} for a new card");
 gui.show();
 
@@ -176,6 +359,7 @@ camera.updateProjectionMatrix();
 controls.target.set(0, 0, 0);
 // The camera is placed by the orbit below; the wheel only sets how far out it is.
 let rollAngle = 0;
+let glideTime = 0;
 // A snapshot of the motion (C copies it), so a moment can be shared and replayed with ?state=.
 let timeShift = 0, lastTime = 0;
 let turnRate = 0;
@@ -283,7 +467,8 @@ function requestCard(values) {
     ([prepared]) => {
       if (id !== flip.request) return;
       flip.prepared = prepared;
-      flip.state = "landing";
+      // On the beat: the swap waits for the next bar to begin.
+      flip.state = flip.onBar ? "ready" : "landing";
     },
     (err) => {
       console.error(err);
@@ -303,6 +488,8 @@ function swapCard() {
   putCard(values.shape);
   shown.shape = values.shape;
   flip.swapped = true;
+  autoChange.restart();
+  beat.swapBar = beat.track?.state.bar ?? -1e9;
 }
 // The card spins up while the next one is made, the new one goes on as it passes edge-on, and it winds down to land
 // facing the camera again.
@@ -314,7 +501,7 @@ function updateFlip(dt) {
     return;
   }
   const prev = flip.angle;
-  if (flip.state === "preparing" || (flip.state === "landing" && !flip.swapped)) {
+  if (flip.state === "preparing" || flip.state === "ready" || (flip.state === "landing" && !flip.swapped)) {
     flip.omega += (SPIN - flip.omega) * (1 - Math.exp(-2.5 * dt));
     flip.angle += flip.omega * dt;
     const edge = (a) => Math.floor((a - Math.PI / 2) / Math.PI);
@@ -337,16 +524,31 @@ function updateFlip(dt) {
     flip.angle = flip.target;
     flip.omega = 0;
     flip.state = "idle";
+    flip.onBar = false;
     autoChange.restart();
   }
 }
 
 // Randomizing (R, the button, auto change) prepares the next card and flips to it, rather than changing it at once.
 let started = false;
-onRandomize(() => {
-  if (!started) return gui.randomizeAll();
-  const was = params.$snapshot();
+// Randomizes the panel, then narrows the bandwidth as the dispersion rises (the bands spread further apart), from
+// 20-40 nm at dispersion 1.5 down to 3-15 nm at 3, never under 3.
+function randomizeLook() {
+  const scene = params.scene();
   gui.randomizeAll();
+  // Always a different scene from the one showing.
+  if (started && params.scene() === scene) {
+    const others = SCENES.filter((name) => name !== scene);
+    params.scene.set(others[Math.floor(Math.random() * others.length)]);
+  }
+  const k = MathUtils.clamp((params.dispersion() - 1.5) / 1.5, 0, 1);
+  const lo = MathUtils.lerp(20, 3, k), hi = MathUtils.lerp(40, 15, k);
+  params.bandwidth.set(Math.max(3, Math.round(lo + Math.random() * (hi - lo))));
+}
+onRandomize(() => {
+  if (!started) return randomizeLook();
+  const was = params.$snapshot();
+  randomizeLook();
   const next = params.$snapshot();
   params.$apply(was);
   requestCard(next);
@@ -368,6 +570,8 @@ const _halfTurn = new Matrix4().makeRotationY(Math.PI);
 const smearState = {};
 
 applyUrlState();
+// The first card is always gears (unless the link says otherwise).
+if (!new URLSearchParams(location.search).has("scene")) params.scene.set("gears");
 
 const fingerprintImage = load.prints.track(loadFingerprints());
 setLook(params.look(), true);
@@ -385,6 +589,8 @@ for (const shape of Object.keys(CARD_STYLES)) compileScene.add(new Mesh(geometri
 const nextFrame = () => new Promise((resolve) => requestAnimationFrame(() => resolve()));
 await load.compile.track(Promise.all([pipeline.compileAsync(compileScene, camera), pipeline.compileAsync(scene, camera), tunnel.prebake(nextFrame), preloadShatterForms(nextFrame)]), 4);
 started = true;
+// Everything is loaded and compiled: the music can start.
+music.play();
 
 gui.addSeparator();
 gui.addText(keysHelp());
@@ -451,22 +657,28 @@ render(({ time, dt }) => {
   updateFlip(dt);
   if (params.look() !== lookShown) setLook((lookShown = params.look()));
   easeLook(1 - Math.exp(-6 * dt));
-  tunnel.update(dt, params.speed(), params.bend(), { streaks: params.streaks() ? 1 : 0, dots: params.dots() ? 1 : 0, shutter: params.blur() && !paused ? SHUTTER : 0 });
+  updateIntro(dt);
+  updateBeat(dt);
+  tunnel.update(dt, params.speed() * (1 + 0.35 * beat.energy * (1 - beat.auto)), params.bend(), { streaks: Math.max(params.streaks() ? 1 : 0, beat.streaks), dots: Math.max(params.dots() ? 1 : 0, beat.dots), shutter: params.blur() && !paused ? SHUTTER : 0 });
 
   // The card dashes down the tunnel: swaying to show its foil and hologram, and spinning for a new one.
   const sway = params.sway();
   const turn = flip.angle;
   // Rolling slowly about its own face, clockwise as the camera sees it, from either side.
-  rollAngle -= dt * params.roll() * Math.sign(Math.cos(turn) || 1);
+  // The glide's pace: with music, the song's mood right now (valence x energy: quiet or sad slower, loud and happy faster).
+  const pace = 0.5 + 1.2 * beat.valence * (1 - beat.auto) + 0.5 * beat.auto;
+  glideTime += dt * pace;
+  const gt = glideTime;
+  rollAngle -= dt * pace * params.roll() * Math.sign(Math.cos(turn) || 1);
   updateSpin(dt);
   // Turned well off the camera to show the hologram's angles (its colours, smear and depth), one way then the other,
   // but kept inside its viewing zone and never square on.
-  const yaw = 0.42 * Math.tanh(1.8 * Math.sin(time * 0.31)) + 0.06 * Math.sin(time * 1.1 + 0.5);
-  const pitch = 0.18 * Math.sin(time * 0.23 + 1) + 0.05 * Math.sin(time * 0.9) - 0.04;
+  const yaw = 0.42 * Math.tanh(1.8 * Math.sin(gt * 0.31)) + 0.06 * Math.sin(gt * 1.1 + 0.5);
+  const pitch = 0.18 * Math.sin(gt * 0.23 + 1) + 0.05 * Math.sin(gt * 0.9) - 0.04;
   // Swaying about the middle of the screen (across the view, whichever way the camera looks), banking into it.
-  const sx = (0.62 * Math.sin(time * 0.47) + 0.14 * Math.sin(time * 1.23 + 1.2)) * sway;
-  const sy = (0.32 * Math.sin(time * 0.61 + 0.8) + 0.07 * Math.sin(time * 1.57)) * sway;
-  const vx = (0.62 * 0.47 * Math.cos(time * 0.47) + 0.14 * 1.23 * Math.cos(time * 1.23 + 1.2)) * sway;
+  const sx = (0.62 * Math.sin(gt * 0.47) + 0.14 * Math.sin(gt * 1.23 + 1.2)) * sway;
+  const sy = (0.32 * Math.sin(gt * 0.61 + 0.8) + 0.07 * Math.sin(gt * 1.57)) * sway;
+  const vx = (0.62 * 0.47 * Math.cos(gt * 0.47) + 0.14 * 1.23 * Math.cos(gt * 1.23 + 1.2)) * sway;
   // The camera circles the card all the way round, always looking at it, rising and dipping on another beat (a
   // Lissajous path), on an ellipsoid narrow enough to stay inside the tunnel; the scroll wheel scales it. Where it comes
   // in closer, at the sides, it widens its view to match, so the card keeps (most of) its size on screen.
@@ -489,7 +701,7 @@ render(({ time, dt }) => {
   _p.copy(camera.position).sub(hero.position);
   const faceYaw = Math.atan2(_p.x, _p.z), facePitch = -Math.atan2(_p.y, Math.hypot(_p.x, _p.z));
   const amount = Math.min(sway, 1.25);
-  mesh.rotation.set(facePitch + pitch * amount, turn + faceYaw + yaw * amount, rollAngle + Math.sin(time * 0.29) * 0.05 * amount - vx * 0.25);
+  mesh.rotation.set(facePitch + pitch * amount, turn + faceYaw + yaw * amount, rollAngle - Math.PI * 2 * beat.barrel * beat.barrel * (3 - 2 * beat.barrel) + Math.sin(gt * 0.29) * 0.05 * amount - vx * 0.25);
   // The drag's turn, in the camera's frame.
   camera.getWorldQuaternion(_camQ);
   mesh.quaternion.premultiply(_dq.copy(_camQ).multiply(spin.q).multiply(_camQ.invert()));
@@ -521,7 +733,8 @@ render(({ time, dt }) => {
   u.uGraze.value = params.graze();
   u.uCardAspect.value = mesh.geometry.userData.aspect ?? 1;
   u.uCardCorner.value = mesh.geometry.userData.corner ?? 0.04;
-  u.uFoil.value = params.foil();
+  // Hats glint the foil, kicks flare the hologram.
+  u.uFoil.value = params.foil() * (1 + 0.8 * beat.hat * (1 - beat.auto));
   u.uSmudgeAmount.value = params.fingerprints();
   u.uCardBorder.value = params.shape() === "glass" ? 0.012 : params.border();
   u.uWear.value = params.wear();
