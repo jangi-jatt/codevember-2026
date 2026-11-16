@@ -229,15 +229,16 @@ function cube(r, group) {
   body.add(twist);
   // Corner-on, three faces showing.
   body.rotation.set(0.55 + 0.15 * r(), 0.75 + 0.15 * (r() - 0.5), 0.1 * (r() - 0.5));
-  body.scale.setScalar(1.15);
   group.add(body);
 }
 
 const BUILDERS = { head, crystals, gear, chess, knot, atom, cube };
+// Scenes that sit further back in the window.
+const FILL = { cube: 0.72 };
 
 export async function buildLightScene(kind, seed) {
   const r = mulberry(seed * 2654435761 + kind.length * 97);
   const group = new Group();
   await BUILDERS[kind](r, group);
-  return { group, dispose: () => group.traverse((o) => o.geometry?.dispose()) };
+  return { group, fill: FILL[kind] ?? 1, dispose: () => group.traverse((o) => o.geometry?.dispose()) };
 }

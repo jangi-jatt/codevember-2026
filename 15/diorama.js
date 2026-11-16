@@ -531,7 +531,8 @@ export function createDiorama(renderer, { shadowSize = 2048 } = {}) {
       }
       await nextFrame();
       const shadow = keyShadowMap(renderer, geometry, shadowSize);
-      return { kind, geometry, bake, shadow };
+      // fill: how much of the window the scene takes (1 fills it; less sets it further back).
+      return { kind, geometry, bake, shadow, fill: built.fill ?? 1 };
     },
     // Puts a prepared scene on show, freeing the one before.
     show(next) {
@@ -583,7 +584,7 @@ export function createDiorama(renderer, { shadowSize = 2048 } = {}) {
         uniforms.span.value = span;
         const R = content.geometry.boundingSphere.radius;
         for (const view of views) {
-          const s = view.radius / R;
+          const s = (view.radius * (content.fill ?? 1)) / R;
           mesh.matrix.multiplyMatrices(view.matrix, _fit.makeScale(s, s, s));
           mesh.matrixWorld.copy(mesh.matrix);
           material.clippingPlanes = view.planes;
