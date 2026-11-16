@@ -12,6 +12,8 @@ const NEAR = 400;
 const FAR = -260;
 
 const SECTION = 140;
+// The rings' spacing (4 lanes' widths): with the music, a whole number of them pass the card each beat.
+const RING_SPACING = (4 * 2 * Math.PI * RADIUS) / 24;
 const BLEND = 60;
 const section = /* glsl */ `
 // The styles: the one round the card, the one coming, and how far the new one has come in (0..1) at s. It comes in
@@ -55,6 +57,8 @@ uniform float tunnelLight;
 uniform float tunnelKick;
 uniform float tunnelWaveS;
 uniform float tunnelWaveAmp;
+// The ring at the card when the current beat began (its index along the tube).
+uniform float tunnelCardRing;
 // The angle's screen derivative, without the jump where atan wraps.
 float tAngleWidth(float a) { return min(fwidth(a), fwidth(mod(a + 6.2831853, 6.2831853) - 3.14159265)); }
 float tHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -231,9 +235,9 @@ vec3 tunnelWall(float style, float a, float s, float d, float blur, float da, fl
     float r = abs(fract(v + 0.5) - 0.5) * 4.0 * UNIT;
     float w = ds + blur;
     vec3 ring = mod(k, 2.0) < 1.0 ? vec3(0.12, 0.55, 1.0) : vec3(0.85, 0.15, 1.0);
-    // Each ring breathes on its own beat.
-    // Every fourth ring flashes on each beat, the lit set moving down the tunnel beat by beat.
-    float hit = mod(k - floor(tunnelBeats), 4.0) < 0.5 ? smoothstep(0.0, 0.08, fract(tunnelBeats)) * exp(-fract(tunnelBeats) * 3.0) : 0.0;
+    // Every fourth ring flashes on each beat, counted from the one passing the card then (locked to the music, it is
+    // there on the beat).
+    float hit = mod(k - tunnelCardRing, 4.0) < 0.5 ? smoothstep(0.0, 0.08, fract(tunnelBeats)) * exp(-fract(tunnelBeats) * 3.0) : 0.0;
     float beat = 0.45 + 0.9 * hit;
     col = ring * mix(4.0 * tBand(r, 0.035, w, mv), 0.5, smoothstep(0.6, 2.0, w)) * beat;
     // Fine rings between, and four light strips along the tube.
@@ -503,6 +507,7 @@ export function createTunnel(renderer) {
     tunnelWaveS: { value: -1e4 },
     tunnelWaveAmp: { value: 0 },
     tunnelBlurLen: { value: 0 },
+    tunnelCardRing: { value: 0 },
     tunnelPixelAngle: { value: 0.001 },
   };
   const material = new PipelineMaterial({
@@ -537,15 +542,31 @@ export function createTunnel(renderer) {
     // speed: metres a second.
     // streaks, dots: the overlays' strengths (0..1), eased to.
     // shutter: seconds of motion blur along the tunnel (0 for none).
-    update(dt, speed, bendAmount = 1, { streaks = 0, dots = 0, shutter = 0 } = {}) {
+    // bpm: with the music, its tempo; the speed then snaps to the nearest whole number of rings a beat, and the travel is
+    // eased into phase with tunnelBeats so a ring passes the card on every beat.
+    update(dt, speed, bendAmount = 1, { streaks = 0, dots = 0, shutter = 0, bpm = 0 } = {}) {
       const u = uniforms;
       const k = 1 - Math.exp(-2 * dt);
       u.tunnelStreaks.value += (streaks - u.tunnelStreaks.value) * k;
       u.tunnelDots.value += (dots - u.tunnelDots.value) * k;
-      u.tunnelTravel.value += dt * speed;
+      if (bpm > 0 && this.beatsFromMusic) {
+        const perBeat = RING_SPACING * (bpm / 60);
+        const rings = Math.max(1, Math.round(speed / perBeat));
+        speed = rings * perBeat;
+        // Phase error in rings, wrapped to -0.5..0.5.
+        const phase = u.tunnelTravel.value / RING_SPACING - u.tunnelBeats.value * rings;
+        const err = phase - Math.round(phase);
+        u.tunnelTravel.value += dt * speed - err * RING_SPACING * (1 - Math.exp(-4 * dt));
+      } else u.tunnelTravel.value += dt * speed;
+      this.speed = speed;
       u.tunnelBlurLen.value = speed * shutter;
       u.tunnelTime.value += dt;
       if (!this.beatsFromMusic) u.tunnelBeats.value += dt * (130 / 60);
+      const beatIndex = Math.floor(u.tunnelBeats.value);
+      if (beatIndex !== this.beatIndex) {
+        this.beatIndex = beatIndex;
+        u.tunnelCardRing.value = Math.round(u.tunnelTravel.value / RING_SPACING);
+      }
       u.tunnelBend.value = bendAmount;
       // Without a director (music), a new style every SECTION metres, in a fixed shuffle.
       if (!this.directed) {
@@ -600,6 +621,9 @@ export function createTunnel(renderer) {
     // Who picks the styles: false, the travel (a new one every SECTION metres); true, the caller (setStyle).
     directed: false,
     sectionK: null,
+    // The speed it last moved at (m/s).
+    speed: 0,
+    beatIndex: null,
   };
 }
 

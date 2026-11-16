@@ -185,9 +185,9 @@ onPause((running) => music.setPaused(!running));
 showSoundHint(() => !music.running);
 
 // The music's beat map (batec, analysed offline: sound/tunnel.batec.json). While it plays, kicks flash the tunnel and
-// send rings of light down it, the low end pushes the speed, snares jolt the card, downbeats pulse it, and the drop
+// send rings of light down it, the travel locks to the beat, snares jolt the card, downbeats pulse it, and the drop
 // spins in a new card.
-const beat = { track: null, hat: 0, last: -1, kick: 0, waveAt: -1e9, wave: 0, energy: 0, barrel: 1, auto: 1, valence: 0.25, kickShown: 0, hatShown: 0, intensity: 0.5, intenseLo: 0, intenseHi: 1, swapBar: -1e9, hectic: 0, rawHectic: 0, hecticTop: 1, hecticPeak: 1, streaks: 0, dots: 0, hecticLo: 0, hecticHi: 1, tunnelBar: -1e9 };
+const beat = { bpm: 0, track: null, hat: 0, last: -1, kick: 0, waveAt: -1e9, wave: 0, barrel: 1, auto: 1, valence: 0.25, kickShown: 0, hatShown: 0, intensity: 0.5, intenseLo: 0, intenseHi: 1, swapBar: -1e9, hectic: 0, rawHectic: 0, hecticTop: 1, hecticPeak: 1, streaks: 0, dots: 0, hecticLo: 0, hecticHi: 1, tunnelBar: -1e9 };
 const beatMap = fetch(new URL("./sound/tunnel.batec.json", import.meta.url)).then((r) => r.json());
 beatMap.then((map) => {
   const track = new Track(map);
@@ -276,8 +276,7 @@ function pickTunnel(t, st) {
   if (pick === now) pick = pick === top ? Math.max(0, pick - 1) : pick + 1;
   beat.tunnelBar = st.bar;
   const lead = (8 - (st.beatInBar + st.beatPhase)) * (60 / (st.bpm || 130));
-  const speed = params.speed() * (1 + 0.35 * beat.energy * (1 - beat.auto));
-  tunnel.setStyle(TUNNEL_BY_INTENSITY[pick], first, speed * lead);
+  tunnel.setStyle(TUNNEL_BY_INTENSITY[pick], first, tunnel.speed * lead);
 }
 function updateBeat(dt) {
   const k = (rate) => Math.exp(-rate * dt);
@@ -288,10 +287,10 @@ function updateBeat(dt) {
       beat.track.seek(t);
     }
     const st = beat.track.update(t);
-    beat.energy += ((st.energy?.low ?? 0) - beat.energy) * (1 - k(4));
     // Mood: the song's valence times its energy right now (happy and loud glides fastest).
     beat.valence += ((st.character?.valence ?? 0.5) * (st.character?.energy ?? 0.5) - beat.valence) * (1 - k(0.5));
     tunnel.uniforms.tunnelBeats.value = st.bar * 4 + st.beatInBar + st.beatPhase;
+    beat.bpm = st.bpm || 130;
     pickTunnel(t, st);
     beat.last = t;
   } else beat.last = -1;
@@ -660,7 +659,9 @@ render(({ time, dt }) => {
   easeLook(1 - Math.exp(-6 * dt));
   updateIntro(dt);
   updateBeat(dt);
-  tunnel.update(dt, params.speed() * (1 + 0.35 * beat.energy * (1 - beat.auto)), params.bend(), { streaks: Math.max(params.streaks() ? 1 : 0, beat.streaks), dots: Math.max(params.dots() ? 1 : 0, beat.dots), shutter: params.blur() && !paused ? SHUTTER : 0 });
+  // With the music the speed is locked to the beat: a whole number of rings a beat, a ring passing the card on each.
+  const locked = tunnel.beatsFromMusic && beat.bpm > 0;
+  tunnel.update(dt, params.speed(), params.bend(), { streaks: Math.max(params.streaks() ? 1 : 0, beat.streaks), dots: Math.max(params.dots() ? 1 : 0, beat.dots), shutter: params.blur() && !paused ? SHUTTER : 0, bpm: locked ? beat.bpm : 0 });
 
   // The card dashes down the tunnel: swaying to show its foil and hologram, and spinning for a new one.
   const sway = params.sway();

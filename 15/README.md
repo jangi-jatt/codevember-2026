@@ -45,8 +45,8 @@ Notable:
 - The scene moves to it, from a beat map made offline with batec (`sound/tunnel.batec.json`, runtime vendored in
   `third_party/batec/`): the tunnel's animations run on the song's beat (the tiles' chase steps on each beat, rings
   flash in turn, the grid's scan goes round once a bar, panels and dots pulse, hats flicker the embers and dots), kicks
-  flash it and send rings of light down it, and the low end pushes the
-  speed; the card glides freely, its only move a barrel roll when a new section of the song begins,
+  flash it and send rings of light down it, and the travel locks to the tempo (the speed snaps to a whole number of rings
+  a beat, eased into phase so a ring passes the card on every beat); the card glides freely, its only move a barrel roll when a new section of the song begins,
   and hats glint its foil. With music, auto change counts the song's bars ("Change every (bars, with music)", 8 by
   default): the card spins up a bar before a phrase and the new one lands on its first downbeat; the drop spins one in
   too. The glide's pace follows the song's mood, its valence times its energy (quiet or sad slower,

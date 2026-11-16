@@ -55,9 +55,12 @@ export function createMusic({ url = new URL("./sound/tunnel.mp3", import.meta.ur
     get enabled() {
       return on;
     },
-    // Seconds into the track (looping), or -1 while it isn't playing.
+    // Seconds into the track as it is heard (looping), or -1 while it isn't playing. currentTime runs ahead of the
+    // speakers by the output latency (more over Bluetooth), less the frame the picture takes to reach the screen.
     get time() {
-      return ctx && duration && ctx.state === "running" ? (ctx.currentTime - startAt) % duration : -1;
+      if (!ctx || !duration || ctx.state !== "running") return -1;
+      const heard = ctx.currentTime - startAt - Math.max(0, (ctx.outputLatency || ctx.baseLatency || 0) - 1 / 60);
+      return heard < 0 ? 0 : heard % duration;
     },
     // Audible: playing and switched on.
     get audible() {
