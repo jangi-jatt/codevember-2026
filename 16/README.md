@@ -33,7 +33,7 @@ between 35 and 100 degrees, so it dips past the terminator briefly but never swi
 the bulk of the colony (all of them), slowly zooming between a close fill and a looser view, and a focus puller takes the
 focus: every 6-12 seconds it racks to another spot between the colony's front and its
 middle, or scans slowly between two, trailing lazily, and when it falls out
-of focus it refocuses quickly with a little overshoot. Any input hands the camera back.
+of focus it refocuses quickly with a little overshoot. Camera speed sets how fast it moves. Any input hands the camera back.
 
 Notable:
 

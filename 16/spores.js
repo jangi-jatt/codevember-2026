@@ -796,6 +796,7 @@ function createSpores(renderer, random) {
   let shownCurrent = 0;
   let shownFresh = true;
   let stepStartRows = 0;
+  let shownRows = 0;
   const lastFrame = shown[1];
   // Per-grain lighting, ping-ponged so each frame eases from the last.
   const lightTargets = [0, 1].map(() => new WebGLRenderTarget(SIZE, SIZE, { type: HalfFloatType, format: RGFormat, minFilter: NearestFilter, magFilter: NearestFilter, depthBuffer: false }));
@@ -1220,6 +1221,9 @@ function createSpores(renderer, random) {
       copyRows(sims[current].textures[0], stepStart, rows);
       stepStartRows = rows;
     }
+    // More grains drawn than last frame (even paused): draw them all from the current state.
+    if (rows > shownRows) shownFresh = true;
+    shownRows = rows;
     if (advancing || shownFresh) {
       lerpMaterial.uniforms.tA.value = stepStart.texture;
       lerpMaterial.uniforms.tB.value = sims[current].textures[0];

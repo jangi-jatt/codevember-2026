@@ -91,6 +91,7 @@ const defaults = {
   blur: 0,
   focusBlur: 0.5,
   focus: -0.35,
+  cameraSpeed: 1,
   spin: 0.12,
   speed: 1,
   pace: 0.5,
@@ -195,6 +196,8 @@ gui.addSection("View");
 // Motion blur, off by default: the shutter as a fraction of the frame (0.5 is a film camera's 180 degrees).
 gui.addSlider("Depth of field", params.focusBlur, 0, 1, 0.01, { randomizable: false });
 gui.addSlider("Focus", params.focus, -1, 1, 0.01, { randomizable: false });
+// How fast the idle camera orbits, reframes and pulls focus.
+gui.addSlider("Camera speed", params.cameraSpeed, 0.2, 3, 0.01, { randomizable: false });
 gui.addSlider("Motion blur", params.blur, 0, 1, 0.01, { randomizable: false });
 gui.addSlider("Spin", params.spin, 0, 1, 0.01, { randomizable: false });
 const autoChange = createAutoChange({ enabled: params.auto, every: params.autoTime, gui });
@@ -588,7 +591,7 @@ function focusPuller(wall) {
 function updateFocus(wall) {
   colonyBulk(_bulkFocus);
   const floaty = idle.amount > 0;
-  if (floaty) focusPuller(wall * (window.app.idleRate ?? 1));
+  if (floaty) focusPuller(wall * params.cameraSpeed() * (window.app.idleRate ?? 1));
   else focus.spot = params.focus();
   const goal = Math.max(0.5, camera.position.distanceTo(_bulkFocus.center) + focus.spot * _bulkFocus.radius);
   const error = Math.abs(goal - focus.value);
@@ -624,8 +627,8 @@ addEventListener(
 );
 const _bulkFocus = { center: new Vector3(), radius: 1 };
 function updateIdleOrbit(wall) {
-  // Recordings can run the idle camera faster (app.idleRate), to show more of it in a short clip.
-  wall *= window.app.idleRate ?? 1;
+  // Camera speed (and, for recordings, app.idleRate) runs the idle camera slower or faster.
+  wall *= params.cameraSpeed() * (window.app.idleRate ?? 1);
   const on = isRunning() && (window.app.idle || (params.auto() && !query.has("capture") && performance.now() - idle.last > IDLE_AFTER));
   if (!on) {
     idle.amount = 0;
@@ -808,6 +811,8 @@ function ease(dt) {
   for (const key of easedKeys) eased[key] += (params[key]() - eased[key]) * k;
 }
 let lastNow = performance.now();
+let lastShown = "";
+let pausedSettle = 0;
 let fpsTime = 0;
 let fpsFrames = 0;
 
@@ -1013,6 +1018,18 @@ render(({ time, dt }) => {
   if (blurOn !== blurWasOn) pipeline.motionBlur = blurWasOn = blurOn;
   updateIdleOrbit(wall);
   controls.update();
+  // While paused, settings that only change the picture (palette, size, look, light, air...) still show: the
+  // pipeline can't see uniforms change, so frames render live while anything shown changes, and a little after (the
+  // grains' light eases over a few frames); then the still settles again.
+  if (!isRunning()) {
+    const shown = RECORDED.map((k) => params[k]()).join() + easedKeys.map((k) => eased[k].toFixed(4)).join() + colors.map((c) => c.getHexString()).join() + micro.toFixed(4);
+    if (shown !== lastShown) pausedSettle = 20;
+    lastShown = shown;
+    if (pausedSettle > 0) {
+      pausedSettle--;
+      pipeline.markMoving();
+    }
+  }
   pipeline.render(scene, camera, time);
 
   fpsFrames++;
