@@ -56,3 +56,9 @@ Notable:
   the query the page opened with plus every randomize and panel change since, and the page fast-forwards to the step
   behind the loading pill. Pointer input, the camera and spin over time, and changes made while paused aren't recorded;
   individual grains land a little differently, as the GPU simulation varies slightly from run to run.
+- Sound: a bed of `sound/sound.mp3` time-stretched 10x at its own pitch into a slow drone (overlapping, jittered grains
+  creeping through the track at a tenth of real time), and the colony's own sounds synthesized from filtered noise and
+  sines and placed in 3D (HRTF) where they happen, with the listener at the camera: the swarm seethes constantly, swells
+  breathe a low rush, bursts crackle, buds gulp, hovering over it rustles, a tap lands with a low thump, gathering builds and flings whoosh, and a transformation groans, a deep, unpitched rush swelling and
+  sinking over tumbling ticks. They pass through a soft saturation and a low-pass, so they come out low, rough and muffled. Faint clicks and clacks come
+  from the room behind the listener, mostly as reverb. M or the button turns it on and off; pausing pauses it.

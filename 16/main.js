@@ -1,4 +1,5 @@
-import { fromDefaults, renderer, camera, controls as sharedControls, render, onResize, onRandomize, applyUrlState, keysHelp, setDay, showHint, loadingStep, addKey, setRunning, isRunning, getSeed, loadSeed } from "common";
+import { fromDefaults, renderer, camera, controls as sharedControls, render, onResize, onRandomize, applyUrlState, keysHelp, setDay, showHint, loadingStep, addKey, setRunning, isRunning, getSeed, loadSeed, addActionButton, onPause, showSoundHint } from "common";
+import { createSound } from "./sound.js";
 import { GUI, signal } from "guspira";
 import { Scene, Vector3, Vector2, Color, Matrix4, Matrix3, Raycaster, WebGLRenderTarget, HalfFloatType, RawShaderMaterial, GLSL3, BufferGeometry, Float32BufferAttribute, Mesh, OrthographicCamera, Quaternion } from "three";
 import { Pipeline } from "modules/pipeline/Pipeline.js";
@@ -132,6 +133,7 @@ function recordEdits() {
 const load = {
   studio: loadingStep(1, "Lighting the studio…"),
   compile: loadingStep(4, "Compiling shaders…"),
+  sound: loadingStep(2, "Loading sound…"),
   ...(replaySteps ? { replay: loadingStep(4, "Replaying the colony…") } : {}),
 };
 
@@ -245,6 +247,18 @@ const buildStamp = signal("…");
 gui.addMonitor("Build", buildStamp);
 gui.endSection();
 pipeline.addGUI(gui);
+// The soundtrack, slowed 10x into a drone, downloaded while the page loads; M or the button turns it on and off,
+// pausing pauses it.
+const sound = createSound({ onProgress: load.sound.set });
+load.sound.track(sound.loaded);
+const soundButton = addActionButton("../assets/sound.svg", "Sound", () => toggleSound());
+function toggleSound() {
+  sound.setEnabled(!sound.enabled);
+  soundButton.querySelector("img").src = `../assets/${sound.enabled ? "sound" : "sound-off"}.svg`;
+}
+addKey("KeyM", "toggle sound", toggleSound);
+onPause((running) => sound.setPaused(!running));
+showSoundHint(() => !sound.running);
 gui.addSeparator();
 gui.addText(keysHelp());
 showHint(
@@ -353,6 +367,7 @@ const endPress = (e) => {
   } else if (press.mode === "attract") {
     // The longer it gathered, the harder the throw.
     u.fling.value = 1.2 + 3 * Math.min(1, press.charge / 1.5);
+    sound.fling(0.4 + 0.6 * Math.min(1, press.charge / 1.5), lastAttract);
   }
   press.mode = null;
   controls.enabled = true;
@@ -365,6 +380,7 @@ let hasLastRay = false;
 const _inv = new Matrix4();
 const _rot = new Matrix3();
 const _p = new Vector3();
+const lastAttract = new Vector3();
 const _v = new Vector3();
 
 camera.position.set(0, 0.2, 5.6);
@@ -394,6 +410,8 @@ onRandomize(() => {
   gui.randomizeAll();
   applyWildness(params.wildness(), true);
   springSlow = 1 + 4 * Math.max(0, Math.abs(params.wildness() - wasWildness) - 0.25);
+  // The transformation's sound lasts as long as the change looks to.
+  if (before) sound.transform(Math.min(5, 2.5 * Math.sqrt(springSlow)), bulk.center);
   if (before) staggerChange(before);
   randomStep(offsetTarget, 2.5 + 1.5 * Math.random());
   simRandom = seededRandom(`sim:${getSeed()}`);
@@ -476,6 +494,7 @@ const glow = (() => {
 
 const atmosphere = createAtmosphere(renderer, { steps: { capture: 64, high: 48, medium: 32, low: 24 }[pipeline.quality] ?? 48 });
 window.app.atmosphere = atmosphere;
+window.app.sound = sound;
 // For recordings: idle = true runs the idle camera (orbit, framing, focus puller) whatever the input or auto change;
 // nextLook({ seed, ring, ...values }) moves to a seed's colony (as randomizing does), then sets any panel values given;
 // ring (0..1) starts the colonies' drift apart and together at that point of its cycle (0: furthest apart).
@@ -495,6 +514,7 @@ window.app.nextLook = ({ seed, ring, ...values } = {}) => {
     applyWildness(values.wildness, false);
     springSlow = 1 + 4 * Math.max(0, Math.abs(values.wildness - wasWildness) - 0.25);
   }
+  sound.transform(Math.min(5, 2.5 * Math.sqrt(springSlow)), bulk.center);
   staggerChange(before);
 };
 
@@ -530,6 +550,7 @@ function updateBud(dt, pace = 1) {
   else if (t < t2) {
     if (t - dt < t1) {
       f.budMark.value = 1;
+      if (recording) sound.bud(colonyPoint(bud.dir, 1.2));
       f.budCentre.value.copy(bud.dir).multiplyScalar(1.0);
     }
     f.budPinch.value = 14 * pace * Math.sin((Math.PI * (t - t1)) / BUD.pinch);
@@ -803,6 +824,9 @@ function updateIdleOrbit(wall) {
 const pulses = [];
 let pulseWait = 2;
 const _pulseDir = new Vector3();
+// A point on the colony's surface toward an object-space direction, in world space (where its sounds come from).
+const _soundAt = new Vector3();
+const colonyPoint = (dir, radius = 1.1) => _soundAt.copy(dir).multiplyScalar(radius).applyMatrix4(spores.mesh.matrixWorld);
 function updatePulses(dt, pace) {
   const f = spores.simUniforms;
   const amount = eased.breathe;
@@ -810,14 +834,16 @@ function updatePulses(dt, pace) {
   if (pulseWait <= 0 && amount > 0) {
     // Uneven gaps: mostly short, now and then a long rest; sometimes a quick double beat.
     pulseWait = simRandom() < 0.25 ? 0.35 + 0.3 * simRandom() : 1 + 4 * Math.pow(simRandom(), 1.5);
-    pulses.push({
+    const p = {
       t: 0,
       amp: 0.25 + 0.5 * simRandom(),
       rise: 0.08 + 0.12 * simRandom(),
       fall: 0.8 + 1.4 * simRandom(),
       dir: new Vector3(simRandom() - 0.5, simRandom() - 0.5, simRandom() - 0.5).normalize(),
       focus: simRandom() * 0.85,
-    });
+    };
+    pulses.push(p);
+    if (recording) sound.pulse(p.amp * amount * 2, p.rise / pace, p.fall / pace, colonyPoint(p.dir));
   }
   let amp = 0;
   let focus = 0;
@@ -857,6 +883,7 @@ function updateSporulation(dt) {
   // A patch some 10-16 degrees across; about half its ripe crust spores go.
   f.sporeCone.value = Math.cos(0.09 + 0.05 * simRandom());
   f.sporeChance.value = 0.5;
+  if (recording) sound.burst(colonyPoint(f.sporeDir.value, 1.15));
 }
 
 // A new colony's colours, crust and grain size reach the spores at different moments and paces (see the spores'
@@ -992,6 +1019,9 @@ function updatePointer(dt) {
   pointer.strength = active ? 1 : pointer.strength * Math.exp(-dt * 4);
   pointer.moved = false;
   u.pointerForce.value = pointer.strength * params.disrupt() * 4;
+  // The rustle only while the pointer is over a colony, where its ray meets it.
+  const over = pointer.inside && pointer.strength > 0.01 ? colonyUnder(pointer.ndc) : null;
+  sound.stir(over ? pointer.strength * Math.min(1, params.disrupt()) : 0, over ? ray.at(over.t, _q) : point);
   // Dragging: the grabbed spores' target is the pointer, at the depth the colony was grabbed at.
   if (press.mode === "grab") {
     u.grabTarget.value.copy(ray.at(press.depth, _q)).applyMatrix4(_inv);
@@ -1005,13 +1035,19 @@ function updatePointer(dt) {
     const tt = Math.max(0, _q.copy(c).sub(ray.origin).dot(ray.direction));
     u.attractPoint.value.copy(ray.at(tt, _q)).applyMatrix4(_inv);
     u.attract.value = 14 * Math.min(1, 0.3 + press.charge);
-  } else u.attract.value = 0;
+    lastAttract.copy(ray.at(tt, _q));
+    sound.gather(Math.min(1, press.charge / 1.5), lastAttract);
+  } else {
+    u.attract.value = 0;
+    sound.gather(0, lastAttract);
+  }
   if (puffPending && dt > 0) {
     raycaster.setFromCamera(puffPending, camera);
     u.burstOrigin.value.copy(raycaster.ray.origin).applyMatrix4(_inv);
     u.burstDir.value.copy(raycaster.ray.direction).applyMatrix3(_rot).normalize();
     u.burstCentre.value.set(0, 0, 0);
     u.burstStrength.value = 3 * params.puff();
+    sound.puff(raycaster.ray.at(Math.max(0, _q.copy(controls.target).sub(raycaster.ray.origin).dot(raycaster.ray.direction)), _q));
     puffPending = null;
   }
 }
@@ -1102,6 +1138,10 @@ gui.addButton("Copy view link (L)", copyViewLink);
 }
 
 render(({ time, dt }) => {
+  sound.update(camera);
+  // The swarm's constant sound: as loud as the colony is lively, swelling with its pulses, from its bulk.
+  const lively = Math.min(1, 0.25 + 0.3 * eased.turbulence * Math.sqrt(params.pace()) * (0.5 + params.flow()) / 1.2);
+  sound.swarm(lively, Math.min(1, spores.simUniforms.pulseAmp.value * 2), bulk.center);
   const now = performance.now();
   const wall = Math.min(0.1, (now - lastNow) / 1000);
   lastNow = now;
