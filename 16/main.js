@@ -159,7 +159,8 @@ gui.addSlider("Detail", params.detail, 0, 1, 0.01, { randomizable: false });
 gui.addSlider("Halo", params.halo, 0, 3, 0.01, { randomizable: false });
 // Studio: the colony in colour under a warm key. Microscope: an electron micrograph (grey, edge-lit, ornamented spores,
 // shallow focus, a scale bar).
-gui.addSegmented("Look", params.look, ["studio", "microscope"], { randomizable: false });
+// The studio/microscope look is hidden for now (params.look stays studio).
+// gui.addSegmented("Look", params.look, ["studio", "microscope"], { randomizable: false });
 // Air and light: a beam of the key light through the haze (the colony casts shafts in it), and dust hanging in the air.
 gui.addSlider("Beam", params.beam, 0, 3, 0.01, { randomizable: false });
 gui.addSlider("Haze", params.haze, 0, 2, 0.01, { randomizable: false });
@@ -260,6 +261,36 @@ addKey("KeyM", "toggle sound", toggleSound);
 onPause((running) => sound.setPaused(!running));
 showSoundHint(() => !sound.running);
 gui.addSeparator();
+// ?soundtest: a section to hear each sound on its own: buttons that play one now, at a random side of the colony (hover
+// and gather run for two seconds), and switches for the layers that are always going.
+const soundTest = { stirUntil: 0, gatherFrom: 0, gatherUntil: 0, stretchFrom: 0, stretchUntil: 0 };
+if (query.has("soundtest")) {
+  gui.addSection("Sound test");
+  const side = () => colonyPoint(new Vector3(nativeRandom() - 0.5, nativeRandom() - 0.5, nativeRandom() - 0.5).normalize()).clone();
+  gui.addButton("Swell", () => sound.test("pulse", 0.9, 0.15, 1.6, side()));
+  gui.addButton("Sporulation burst", () => sound.test("burst", side()));
+  gui.addButton("Bud pinching off", () => sound.test("bud", side()));
+  gui.addButton("Tap (impact)", () => sound.test("puff", side()));
+  gui.addButton("Hover (2 s)", () => (soundTest.stirUntil = performance.now() + 2000));
+  gui.addButton("Gather (2 s), then fling", () => {
+    soundTest.gatherFrom = performance.now();
+    soundTest.gatherUntil = soundTest.gatherFrom + 2000;
+  });
+  gui.addButton("Grab (unstick)", () => sound.test("unstick", side()));
+  gui.addButton("Stretch (2 s)", () => {
+    soundTest.stretchFrom = performance.now();
+    soundTest.stretchUntil = soundTest.stretchFrom + 2000;
+  });
+  gui.addButton("Colonies parting", () => sound.test("part", bulk.center));
+  gui.addButton("Colonies fusing", () => sound.test("fuse", bulk.center));
+  gui.addButton("Transformation", () => sound.test("transform", 2.5, bulk.center));
+  gui.addButton("Room click", () => sound.test("click"));
+  for (const [label, layer] of [["Slowed track", "bed"], ["Swarm", "swarm"], ["Room clicks", "room"], ["Colony life (swells, bursts, buds)", "life"]]) {
+    const on = signal(true);
+    gui.addCheckbox(label, on, { onChange: (v) => sound.setMuted(layer, !v) });
+  }
+  gui.endSection();
+}
 gui.addText(keysHelp());
 showHint(
   "Move over it to stir · click to puff · drag a colony to stretch it · hold right to gather, release to fling · drag around it to orbit · or leave it be and watch · R for a new colony",
@@ -349,6 +380,7 @@ renderer.domElement.addEventListener("pointermove", (e) => {
     clearTimeout(press.longPress);
     const u = spores.simUniforms;
     raycaster.setFromCamera(press.ndc, camera);
+    sound.unstick(raycaster.ray.at(press.depth, _q));
     u.grabOrigin.value.copy(raycaster.ray.origin).applyMatrix4(_inv);
     u.grabDir.value.copy(raycaster.ray.direction).applyMatrix3(_rot).normalize();
     u.grabMark.value = 1;
@@ -612,6 +644,11 @@ function updateColonies(simTime) {
   const near = k === 2 ? 0.5 : 0.55;
   const far = k === 2 ? 1.2 : 1.15;
   const spread = (far + (near - far) * smoothstep01((u - 0.15) / 0.45)) * colonyMix.spread;
+  // Colonies fusing at the surface and parting again (as they drift together and apart, or split and merge on a change
+  // in their number): a wet merge, a slow tear.
+  const fused = smoothstep01((u - 0.15) / 0.45) > 0.85 || colonyMix.spread < 0.35;
+  if (recording && colonyMix.wasFused !== undefined && fused !== colonyMix.wasFused) (fused ? sound.fuse : sound.part)(bulk.center);
+  colonyMix.wasFused = fused;
   // The ring turns in the plane facing the camera (in the colony's own space), so no colony hides behind another.
   const turn = simTime * 0.12;
   _view.copy(camera.position).sub(controls.target).applyMatrix3(_rot.setFromMatrix4(_inv.copy(spores.mesh.matrixWorld).invert())).normalize();
@@ -1021,12 +1058,27 @@ function updatePointer(dt) {
   u.pointerForce.value = pointer.strength * params.disrupt() * 4;
   // The rustle only while the pointer is over a colony, where its ray meets it.
   const over = pointer.inside && pointer.strength > 0.01 ? colonyUnder(pointer.ndc) : null;
-  sound.stir(over ? pointer.strength * Math.min(1, params.disrupt()) : 0, over ? ray.at(over.t, _q) : point);
+  const testing = performance.now() < soundTest.stirUntil;
+  sound.stir(testing ? 0.8 : over ? pointer.strength * Math.min(1, params.disrupt()) : 0, testing ? bulk.center : over ? ray.at(over.t, _q) : point);
   // Dragging: the grabbed spores' target is the pointer, at the depth the colony was grabbed at.
   if (press.mode === "grab") {
     u.grabTarget.value.copy(ray.at(press.depth, _q)).applyMatrix4(_inv);
     u.grabPull.value = 30;
-  } else u.grabPull.value = 0;
+    // The stretch's sound: as loud as the pull moves, higher the further the spores are pulled from where they were.
+    const at = ray.at(press.depth, _q);
+    if (!press.grabFrom) press.grabFrom = at.clone();
+    const tension = Math.min(1, at.distanceTo(press.grabFrom) / 1.5);
+    press.stretchLevel = Math.max(Math.min(1, _v.length() * 0.6), (press.stretchLevel ?? 0) * Math.exp(-dt * 3));
+    sound.stretch(press.stretchLevel * (0.4 + 0.6 * tension), tension, at);
+  } else {
+    u.grabPull.value = 0;
+    press.grabFrom = null;
+    press.stretchLevel = 0;
+    // The test panel's stretch: a steady pull, tightening over two seconds.
+    const now = performance.now();
+    const k = now < soundTest.stretchUntil ? (now - soundTest.stretchFrom) / 2000 : 0;
+    sound.stretch(k ? 0.4 + 0.6 * k : 0, k, bulk.center);
+  }
   // Gathering: toward the point on the ray nearest the colony under it (or the colony's middle).
   if (press.mode === "attract") {
     press.charge += dt;
@@ -1039,7 +1091,16 @@ function updatePointer(dt) {
     sound.gather(Math.min(1, press.charge / 1.5), lastAttract);
   } else {
     u.attract.value = 0;
-    sound.gather(0, lastAttract);
+    // The test panel's gather: builds over two seconds, then flings.
+    const now = performance.now();
+    if (now < soundTest.gatherUntil) sound.gather((now - soundTest.gatherFrom) / 2000, bulk.center);
+    else {
+      if (soundTest.gatherUntil) {
+        soundTest.gatherUntil = 0;
+        sound.fling(1, bulk.center);
+      }
+      sound.gather(0, lastAttract);
+    }
   }
   if (puffPending && dt > 0) {
     raycaster.setFromCamera(puffPending, camera);

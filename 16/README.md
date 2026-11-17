@@ -13,7 +13,7 @@ button (long-press on touch) to gather spores and release to fling them, drag ar
 under), scroll to zoom, Shift + scroll to move the focus through it, R for a new colony, L to copy a link to the view.
 While paused, every drag orbits. Or leave it be: auto change brings a new colony every 10 seconds once the last change
 has settled, and after 5 seconds without input the camera takes over. The panel sets the spores (count, size, palette,
-crust, translucency, detail), the look (studio or microscope, halo, light beam, haze, dust, depth of field, focus,
+crust, translucency, detail), the look (halo, light beam, haze, dust, depth of field, focus,
 motion blur, spin, camera speed) and the physics (wildness, colonies, sorting, speed, pace, flow, turbulence, scale,
 cohesion, bonds, pressure, drag, tear, collisions, pulses, sporulation, budding, and how hard hovering and puffing hit).
 
@@ -59,6 +59,7 @@ Notable:
 - Sound: a bed of `sound/sound.mp3` time-stretched 10x at its own pitch into a slow drone (overlapping, jittered grains
   creeping through the track at a tenth of real time), and the colony's own sounds synthesized from filtered noise and
   sines and placed in 3D (HRTF) where they happen, with the listener at the camera: the swarm seethes constantly, swells
-  breathe a low rush, bursts crackle, buds gulp, hovering over it rustles, a tap lands with a low thump, gathering builds and flings whoosh, and a transformation groans, a deep, unpitched rush swelling and
+  breathe a low rush, bursts crackle, buds gulp, hovering over it rustles, a tap lands with a low thump, grabbing a
+  colony comes unstuck with a smaller one and stretching it creaks, colonies tear apart and fuse back with a wet merge, gathering builds and flings whoosh, and a transformation groans, a deep, unpitched rush swelling and
   sinking over tumbling ticks. They pass through a soft saturation and a low-pass, so they come out low, rough and muffled. Faint clicks and clacks come
   from the room behind the listener, mostly as reverb. M or the button turns it on and off; pausing pauses it.

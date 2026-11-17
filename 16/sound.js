@@ -27,8 +27,13 @@ const rand = (a, b) => a + (b - a) * nativeRandom();
 
 export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url).href, onProgress, volume = 0.7, bed = 0.55 } = {}) {
   let ctx = null, master = null, bedGain = null, fx = null, reverb = null, noise = null, buffer = null;
+  let lastCamera = null;
   let on = true, paused = false, next = 0, position = 0, nextClick = 0, listenerRight = [1, 0, 0];
-  let stirVoice = null, gatherVoice = null, swarmSand = null, swarmSand2 = null, swarmMurmur = null, swarmRumble = null;
+  // Layers that can be muted to hear the rest on their own (the ?soundtest panel): the bed, the swarm, the room's clicks,
+  // and the colony's own events (swells, bursts, buds).
+  const mute = { bed: false, swarm: false, room: false, life: false };
+  let testing = false;
+  let stretchVoice = null, stirVoice = null, gatherVoice = null, swarmSand = null, swarmSand2 = null, swarmMurmur = null, swarmRumble = null;
   const data = fetchWithProgress(url, onProgress).then((r) => r.arrayBuffer());
   data.catch(() => {});
 
@@ -88,6 +93,19 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
     swarmMurmur = sustained(180, 0.8, "bandpass");
     swarmRumble = sustained(60, 0.7, "lowpass");
     stirVoice = sustained(450, 1.2, "bandpass");
+    // Stretching: a resonant band of noise, creaking through a slow flutter.
+    stretchVoice = sustained(120, 4, "bandpass");
+    const creak = ctx.createOscillator();
+    creak.frequency.value = 13;
+    const creakDepth = ctx.createGain();
+    creakDepth.gain.value = 0.5;
+    const creakGain = ctx.createGain();
+    creakGain.gain.value = 0.5;
+    stretchVoice.level.disconnect();
+    stretchVoice.level.connect(creakGain).connect(stretchVoice.node);
+    creak.connect(creakDepth).connect(creakGain.gain);
+    creak.start();
+    stretchVoice.creak = creak;
     gatherVoice = sustained(90, 0.7, "lowpass");
     try {
       buffer = await ctx.decodeAudioData((await data).slice(0));
@@ -102,6 +120,7 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
   for (const e of ["pointerdown", "touchend", "click", "keydown"]) addEventListener(e, resume, { capture: true });
 
   const live = () => !!ctx && ctx.state === "running" && on;
+  const lively = () => live() && (testing || !mute.life);
 
   // A 3D source at a world point, with its direct sound (dry) and a send to the room's reverb (wet).
   function panner(p, dry = 1, wet = 0.2) {
@@ -224,6 +243,7 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
     loaded: data,
     // Schedules the bed's grains due in the next moment and puts the listener at the camera; call every frame.
     update(camera) {
+      lastCamera = camera;
       if (!ctx || ctx.state !== "running") return;
       const l = ctx.listener, e = camera.matrixWorld.elements, t = ctx.currentTime;
       const p = [e[12], e[13], e[14]], f = [-e[8], -e[9], -e[10]], u = [e[4], e[5], e[6]];
@@ -236,7 +256,7 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
         l.setPosition(...p);
         l.setOrientation(...f, ...u);
       }
-      if (on && t >= nextClick) {
+      if (on && !mute.room && t >= nextClick) {
         clacks(p, f, u);
         nextClick = t + rand(0.4, 3.5);
       }
@@ -249,7 +269,7 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
     },
     // A swell: a low rush rising over rise seconds and sagging over fall, at a point on the colony.
     pulse(amp, rise, fall, at) {
-      if (!live()) return;
+      if (!lively()) return;
       const t = ctx.currentTime;
       const filter = ctx.createBiquadFilter();
       filter.type = "lowpass";
@@ -262,7 +282,7 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
     },
     // A sporulation burst: a scatter of tiny pops over half a second, round a point.
     burst(at) {
-      if (!live()) return;
+      if (!lively()) return;
       const t = ctx.currentTime;
       const node = panner(at);
       const count = Math.round(rand(10, 18));
@@ -280,7 +300,7 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
     },
     // A bud pinching off: a low, soft gulp.
     bud(at) {
-      if (!live()) return;
+      if (!lively()) return;
       const t = ctx.currentTime;
       const osc = ctx.createOscillator();
       osc.frequency.setValueAtTime(rand(55, 75), t);
@@ -365,7 +385,7 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
     // bulk; swell (0..1) lifts it with each pulse.
     swarm(level, swell, at) {
       if (!swarmSand) return;
-      const t = ctx.currentTime, l = live() ? level : 0;
+      const t = ctx.currentTime, l = live() && !mute.swarm ? level : 0;
       for (const [voice, f] of [[swarmSand, 1], [swarmSand2, 0.8]]) {
         voice.level.gain.setTargetAtTime(0.14 * l * (1 + 0.7 * swell), t, 0.3);
         voice.filter.frequency.setTargetAtTime(f * (300 + 220 * l + 160 * swell), t, 0.3);
@@ -378,6 +398,62 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
       setPosition(swarmSand2.node, { x: at.x - e[0] * 0.9, y: at.y - e[1] * 0.9, z: at.z - e[2] * 0.9 });
       setPosition(swarmMurmur.node, at);
       setPosition(swarmRumble.node, at);
+    },
+    // Stretching a colony: a creaking, wet stretch as loud as the pull is fast (0..1), higher as it is stretched further
+    // (tension 0..1), at the pointer.
+    stretch(level, tension, at) {
+      if (!stretchVoice) return;
+      const t = ctx.currentTime;
+      stretchVoice.level.gain.setTargetAtTime(live() ? 0.5 * level : 0, t, 0.06);
+      stretchVoice.filter.frequency.setTargetAtTime(80 + 220 * tension, t, 0.1);
+      stretchVoice.creak.frequency.setTargetAtTime(9 + 12 * tension, t, 0.1);
+      if (level > 0.01) setPosition(stretchVoice.node, at);
+    },
+    // Grabbing a colony: a small thump as the spores come unstuck.
+    unstick(at) {
+      if (!live()) return;
+      impact(panner(at, 1, 0.3), ctx.currentTime, 0.1, 0.6);
+    },
+    // Colonies parting: a slow, low tearing, a rumble under dense crackle.
+    part(at) {
+      if (!live()) return;
+      const t = ctx.currentTime;
+      const node = panner(at, 1, 0.5);
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.setValueAtTime(380, t);
+      filter.frequency.exponentialRampToValueAtTime(110, t + 1.2);
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0, t);
+      env.gain.linearRampToValueAtTime(0.16, t + 0.25);
+      env.gain.setTargetAtTime(0, t + 0.5, 0.3);
+      noiseSource(t, 1.8).connect(filter).connect(env).connect(node);
+      for (let i = 0; i < 24; i++) {
+        const when = t + Math.pow(nativeRandom(), 0.8) * 1.1;
+        const tick = ctx.createBiquadFilter();
+        tick.type = "bandpass";
+        tick.frequency.value = rand(200, 520);
+        tick.Q.value = 5;
+        const tickEnv = ctx.createGain();
+        tickEnv.gain.setValueAtTime(rand(0.06, 0.16), when);
+        tickEnv.gain.exponentialRampToValueAtTime(0.001, when + rand(0.015, 0.035));
+        noiseSource(when, 0.05).connect(tick).connect(tickEnv).connect(node);
+      }
+    },
+    // Colonies fusing: a soft, wet merge, a gentle thump and a short low swell.
+    fuse(at) {
+      if (!live()) return;
+      const t = ctx.currentTime;
+      const node = panner(at, 1, 0.5);
+      impact(node, t, 0.14, 1.3);
+      const filter = ctx.createBiquadFilter();
+      filter.type = "lowpass";
+      filter.frequency.value = 160;
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0, t);
+      env.gain.linearRampToValueAtTime(0.2, t + 0.3);
+      env.gain.setTargetAtTime(0, t + 0.4, 0.25);
+      noiseSource(t, 1.6).connect(filter).connect(env).connect(node);
     },
     // Hovering: a rustle as loud as the stir (0..1), at the pointer.
     stir(level, at) {
@@ -395,6 +471,20 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
     },
     get enabled() {
       return on;
+    },
+    // Mutes or unmutes a layer: "bed", "swarm", "room" or "life".
+    setMuted(layer, muted) {
+      mute[layer] = muted;
+      if (layer === "bed" && bedGain) bedGain.gain.setTargetAtTime(muted ? 0 : bed, ctx.currentTime, 0.2);
+    },
+    // Plays one of the colony's sounds now, even with its layer muted (for the test panel).
+    test(name, ...args) {
+      testing = true;
+      if (name === "click") {
+        const e = lastCamera.matrixWorld.elements;
+        clacks([e[12], e[13], e[14]], [-e[8], -e[9], -e[10]], [e[4], e[5], e[6]]);
+      } else this[name](...args);
+      testing = false;
     },
     // Playing (not waiting for a gesture).
     get running() {
