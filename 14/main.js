@@ -445,9 +445,26 @@ const _axis = new Vector3(), _dq = new Quaternion();
 // The body drifts slowly round the centre on a soft spring; a swipe also pushes it. The coat feels the acceleration.
 const SLOSH = { wander: 0.12, stiffness: 1.6, damping: 1.4, push: 0.3, maxPush: 1.4, gain: 0.55 };
 const bodyVel = new Vector3(), linAccel = new Vector3(), _wander = new Vector3(), _f = new Vector3();
-const showcase = { on: false, zoom: false, base: 0, face: {} };
-const _view = new Vector3(), _thin = new Vector3(), _align = new Quaternion();
+const showcase = { on: false, zoom: false, base: 0, face: {}, zoomVel: 0 };
+const _view = new Vector3(), _thin = new Vector3(), _align = new Quaternion(), _err = new Vector3(), alignVel = new Vector3();
+const SHOWCASE_SPRING = 0.45;
+// Scripted pushes and spins ramp in over KICK_TIME (a smooth bump of force), never in one frame.
+const KICK_TIME = 0.5;
+const nudges = [];
+function applyKicks(dt) {
+  for (let i = nudges.length - 1; i >= 0; i--) {
+    const k = nudges[i];
+    const t0 = 1 - k.left / KICK_TIME, t1 = Math.min(1, t0 + dt / KICK_TIME);
+    const share = (t1 * t1 * (3 - 2 * t1)) - (t0 * t0 * (3 - 2 * t0));
+    bodyVel.addScaledVector(k.lin, share);
+    linAccel.addScaledVector(k.lin, share);
+    flickOmega.addScaledVector(k.ang, share);
+    if ((k.left -= dt) <= 0) nudges.splice(i, 1);
+  }
+}
+
 function moveBody(time, dt) {
+  applyKicks(dt);
   _wander.set(Math.sin(time * 0.31 + 1.0), Math.sin(time * 0.23 + 2.0) * 0.8, Math.sin(time * 0.27 + 4.0)).multiplyScalar(SLOSH.wander * params.drift());
   _f.copy(_wander).sub(body.position).multiplyScalar(SLOSH.stiffness * SLOSH.stiffness).addScaledVector(bodyVel, -2 * SLOSH.damping);
   linAccel.add(_f.clone().multiplyScalar(dt));
@@ -465,14 +482,20 @@ function moveBody(time, dt) {
       // A set facing points at the camera (the view runs from it, so the axis turns to oppose it); a thin axis either way.
       if (face) _thin.negate();
       else if (_thin.dot(_view) < 0) _thin.negate();
+      // A soft angular spring with velocity, so the body eases into its facing and out of it, never stops dead. It
+      // lets go while a quick spin is running and gathers the body back afterwards.
       _align.setFromUnitVectors(_thin, _view);
-      _dq.identity().slerp(_align, Math.min(1, dt * 1.2));
-      body.quaternion.premultiply(_dq);
+      const angle = 2 * Math.acos(Math.min(1, Math.abs(_align.w)));
+      const s = Math.sqrt(Math.max(1e-12, 1 - _align.w * _align.w)) * Math.sign(_align.w || 1);
+      _err.set(_align.x, _align.y, _align.z).divideScalar(s || 1).multiplyScalar(angle);
+      const k = SHOWCASE_SPRING * (1 - Math.min(1, flickOmega.length() / 1.5));
+      alignVel.addScaledVector(_err, k * dt).multiplyScalar(Math.exp(-dt * 2 * Math.sqrt(SHOWCASE_SPRING)));
     }
   }
   flickOmega.multiplyScalar(Math.exp(-dt / 2.5));
   prevOmega.copy(omega);
   omega.copy(_axis).multiplyScalar(params.spin()).add(flickOmega);
+  if (showcase.on) omega.add(alignVel);
   const w = omega.length();
   if (w > 1e-6) {
     _dq.setFromAxisAngle(_axis.copy(omega).divideScalar(w), w * dt);
@@ -828,7 +851,9 @@ window.app = {
   },
   pick,
   // For recordings: every shape and background ready, so no change waits.
-  preload: () => Promise.all([...Object.keys(SHAPES).map((n) => prepareShape(n)), ...Object.keys(BACKGROUNDS).map((n) => prepareBackground(n))]),
+  // ready(app), if given, runs once everything is in (a recorder's setup before its first frame).
+  preload: (ready) =>
+    Promise.all([...Object.keys(SHAPES).map((n) => prepareShape(n)), ...Object.keys(BACKGROUNDS).map((n) => prepareBackground(n))]).then(() => ready?.(window.app)),
   // n tendrils pulled at once from spots facing the camera.
   pull(n = 3) {
     for (let k = 0; k < n; k++) {
@@ -847,20 +872,19 @@ window.app = {
   // A push along a world direction: the body moves and turns, the water swings behind.
   push(dir, strength = 1) {
     const v = dir.clone().normalize().multiplyScalar(SLOSH.maxPush * strength);
-    bodyVel.add(v);
-    linAccel.add(v);
-    flickOmega.add(new Vector3(0, 0, 1).cross(v).multiplyScalar(1.2));
+    nudges.push({ lin: v, ang: new Vector3(0, 0, 1).applyQuaternion(camera.quaternion).cross(v).multiplyScalar(1.2), left: KICK_TIME });
     sound.shot("whoosh", { gain: 0.4 * strength, rate: 0.95 });
     sound.shot("swirl", { gain: 0.5 * strength });
   },
-  // A quick spin about the line of sight (rad/s at its start), easing off over a few seconds; the coat flings out.
+  // A quick spin about the screen's vertical, so the turn reads to the camera.
   spin(speed = 4) {
-    flickOmega.addScaledVector(_eye.copy(orbit.target).sub(camera.position).normalize(), speed);
+    nudges.push({ lin: new Vector3(), ang: new Vector3(0, 1, 0).applyQuaternion(camera.quaternion).multiplyScalar(speed), left: KICK_TIME });
     sound.shot("whoosh", { gain: 0.6, rate: 1.1 });
     sound.shot("swirl", { gain: 0.7 });
   },
-  tapRandom(n = 1) {
-    for (let k = 0; k < n; k++) tapSomewhere(params.tapStrength() * (0.9 + 0.4 * nativeRandom()), lastTime, false);
+  // n taps; strength (× Tap strength) is random about 1 unless given.
+  tapRandom(n = 1, strength = null) {
+    for (let k = 0; k < n; k++) tapSomewhere(params.tapStrength() * (strength ?? 0.9 + 0.4 * nativeRandom()), lastTime, false);
   },
   // Turns the camera so the background's brightest region sits right behind the object.
   // amount < 1 eases toward it (call every frame), so a new background swings the view round smoothly.
@@ -882,6 +906,16 @@ window.app = {
     showcase.face = face;
     showcase.zoom = zoom;
     showcase.base = camera.position.distanceTo(orbit.target);
+    // Turn to the facing at once, so a recording starts settled.
+    const p = look.shape.tween?.to ?? look.shape.shown;
+    if (p) {
+      const v = orbit.target.clone().sub(camera.position).normalize();
+      const f = face[p.name];
+      const a = (f ? new Vector3().fromArray(f) : p.thin.clone()).transformDirection(body.matrixWorld);
+      if (f || a.dot(v) < 0) a.negate();
+      body.quaternion.premultiply(new Quaternion().setFromUnitVectors(a, v));
+      body.updateMatrixWorld();
+    }
   },
   tap: (x, y) => {
     const hit = pick(x, y);
@@ -957,7 +991,7 @@ function updateRipples(time) {
     steep += Math.abs(amp) * u.rippleWave.value.z;
   });
   // Overlapping trains add up: past a combined steepness the water folds into chaos, so they share a budget.
-  const budget = 1.1;
+  const budget = 3;
   if (steep > budget) {
     for (let i = 0; i < ripples.length; i++) u.rippleAmp.value[i] *= budget / steep;
     steep = budget;
@@ -1061,12 +1095,17 @@ render(({ time, dt }) => {
     // The camera eases out when drops or tendrils reach far, and back in once they're home.
     const rest = shape.radius * scale + coat() * 2 + 0.25;
     let far = rest;
-    for (const b of parcels.list) far = Math.max(far, b.p.distanceTo(centre) + b.r);
-    for (const t of tendrils) far = Math.max(far, t.tip.distanceTo(centre) + GESTURE.tendrilRadius);
-    const want = showcase.base * Math.max(1, far / rest);
+    // Drops flung far are let go rather than chased: the camera only widens by half at most.
+    const reach = rest * 1.5;
+    const near = (d) => (d <= reach ? d : rest);
+    for (const b of parcels.list) far = Math.max(far, near(b.p.distanceTo(centre) + b.r));
+    for (const t of tendrils) far = Math.max(far, near(t.tip.distanceTo(centre) + GESTURE.tendrilRadius));
+    const want = showcase.base * Math.min(1.5, Math.max(1, far / rest));
     const dist = camera.position.distanceTo(orbit.target);
-    const next = dist + (want - dist) * (1 - Math.exp(-dt / (want > dist ? 0.35 : 1.2)));
-    camera.position.sub(orbit.target).setLength(next).add(orbit.target);
+    // A critically damped spring on the distance, so the camera glides out and back without a kink.
+    const kz = 3;
+    showcase.zoomVel += ((want - dist) * kz - 2 * Math.sqrt(kz) * showcase.zoomVel) * dt;
+    camera.position.sub(orbit.target).setLength(dist + showcase.zoomVel * dt).add(orbit.target);
   }
   pipeline.render(scene, camera, time);
 });
