@@ -96,6 +96,7 @@ const defaults = {
   speed: 1,
   pace: 0.5,
   colonies: 1,
+  wildness: 0.5,
   sorting: 0.6,
   auto: true,
   autoTime: 10,
@@ -114,6 +115,9 @@ const events = (() => {
   }
 })();
 let recording = false;
+// Bigger changes take longer: the physics springs slow down with how far the wildness jumped (set on each new colony).
+let springSlow = 1;
+let nextLookPending = false;
 const recorded = {};
 function snapshotParams() {
   for (const k of RECORDED) recorded[k] = params[k]();
@@ -161,7 +165,32 @@ gui.addSlider("Dust", params.dust, 0, 3, 0.01, { randomizable: false });
 gui.addSection("Physics");
 // How fast the current changes, and how hard it stirs.
 // Colonies: one, or two or three that drift apart, meet, merge and split again.
-gui.addSlider("Colonies", params.colonies, 1, 3, 1).randomize = () => params.colonies.set(Math.random() < 0.55 ? 1 : Math.random() < 0.6 ? 2 : 3);
+// Wildness sets the colony's physics in one go: calm (a slow, rounded blob that barely pulses) through the usual
+// colony to wild (a strong, coarse current against weak cohesion and pressure, held by tough bonds, so the mass
+// stretches out into arms, pulsing, budding and bursting more). Randomizing alternates a calmer and a wilder colony;
+// on each side, most land near the middle and few at the extremes.
+const WILD = {
+  calm: { turbulence: 0.6, scale: 1.3, cohesion: 1.4, pressure: 1.2, bonds: 1, tear: 0.6, flow: 0.45, breathe: 0.2, sporulation: 0.4, budding: 0.4 },
+  usual: { turbulence: 1.3, scale: 0.95, cohesion: 0.9, pressure: 0.9, bonds: 1.2, tear: 0.4, flow: 0.75, breathe: 0.45, sporulation: 1, budding: 1 },
+  wild: { turbulence: 2.05, scale: 0.76, cohesion: 0.6, pressure: 0.68, bonds: 1.55, tear: 0.25, flow: 1, breathe: 0.56, sporulation: 1.45, budding: 1.4 },
+};
+function applyWildness(w, randomized) {
+  const [a, b, t] = w < 0.5 ? [WILD.calm, WILD.usual, w * 2] : [WILD.usual, WILD.wild, w * 2 - 1];
+  for (const k of Object.keys(a)) {
+    const v = a[k] + (b[k] - a[k]) * t;
+    params[k].set(round(randomized ? v * (1 + (Math.random() * 2 - 1) * 0.08) : v));
+  }
+}
+let wildSide = 0;
+function randomWildness() {
+  // Alternate sides; the distance from the middle leans small, so the extremes are rare.
+  wildSide = 1 - wildSide;
+  const d = 0.1 + 0.4 * Math.pow(Math.random(), 2);
+  return round(wildSide ? 0.5 + d : 0.5 - d);
+}
+gui.addSlider("Wildness", params.wildness, 0, 1, 0.01, { onChange: (v) => applyWildness(v, false) }).randomize = () => params.wildness.set(randomWildness());
+// Several colonies always go back to one before the next split, so a change never goes from two straight to three.
+gui.addSlider("Colonies", params.colonies, 1, 3, 1).randomize = () => params.colonies.set(params.colonies() > 1 ? 1 : Math.random() < 0.45 ? 1 : Math.random() < 0.6 ? 2 : 3);
 // How much spores drift toward their own colour: 0 lets the stirring mix them freely, higher gathers the colours into
 // patches and streams (never fully apart).
 gui.addSlider("Sorting", params.sorting, 0, 2, 0.01).randomize = () => params.sorting.set(round(0.3 + 0.7 * Math.random()));
@@ -200,7 +229,13 @@ gui.addSlider("Focus", params.focus, -1, 1, 0.01, { randomizable: false });
 gui.addSlider("Camera speed", params.cameraSpeed, 0.2, 3, 0.01, { randomizable: false });
 gui.addSlider("Motion blur", params.blur, 0, 1, 0.01, { randomizable: false });
 gui.addSlider("Spin", params.spin, 0, 1, 0.01, { randomizable: false });
-const autoChange = createAutoChange({ enabled: params.auto, every: params.autoTime, gui });
+// Auto change counts toward the next colony only once the last change has mostly settled.
+const autoChange = createAutoChange({ enabled: params.auto, every: params.autoTime, gui, ready: () => changeSettled() });
+function changeSettled() {
+  if (params.colonies() !== colonyMix.shown) return false;
+  for (const key of SPRING_KEYS) if (Math.abs(params[key]() - eased[key]) > 0.12 * Math.max(0.3, Math.abs(params[key]()))) return false;
+  return spores.simUniforms.offset.value.distanceTo(offsetTarget) < 0.5;
+}
 gui.addSection("Performance", { open: false });
 const stats = { fps: signal(0), spores: signal(0) };
 gui.addMonitor("FPS", stats.fps);
@@ -212,7 +247,10 @@ gui.endSection();
 pipeline.addGUI(gui);
 gui.addSeparator();
 gui.addText(keysHelp());
-showHint("Drag to orbit · click a colony to puff, drag it to pull · R for a new colony", "Drag to orbit · tap a colony to puff, drag it to pull · tap {randomize} for a new colony");
+showHint(
+  "Move over it to stir · click to puff · drag a colony to stretch it · hold right to gather, release to fling · drag around it to orbit · or leave it be and watch · R for a new colony",
+  "Tap to puff · drag a colony to stretch it · long-press to gather, release to fling · drag around it to orbit · or leave it be and watch · tap {randomize} for a new colony",
+);
 gui.show();
 
 function round(v) {
@@ -256,7 +294,7 @@ const toNdc = (e, out) => {
 function colonyUnder(ndc) {
   raycaster.setFromCamera(ndc, camera);
   const ray = raycaster.ray;
-  const k = params.colonies();
+  const k = colonyMix.shown;
   const radius = 1.05 * Math.cbrt(1 / k) + 0.1;
   let best = null;
   for (let i = 0; i < k; i++) {
@@ -337,7 +375,13 @@ controls.maxDistance = 9;
 onResize((w, h, dpr) => pipeline.setSize(w, h, dpr));
 
 onRandomize(() => {
+  // The look on screen before the change, for each spore to change from on its own schedule.
+  const before = recording && !nextLookPending ? { colors: colors.map((c) => c.clone()), crust: eased.crust, size: eased.size } : null;
+  const wasWildness = params.wildness();
   gui.randomizeAll();
+  applyWildness(params.wildness(), true);
+  springSlow = 1 + 4 * Math.max(0, Math.abs(params.wildness() - wasWildness) - 0.25);
+  if (before) staggerChange(before);
   randomStep(offsetTarget, 2.5 + 1.5 * Math.random());
   simRandom = seededRandom(`sim:${getSeed()}`);
   if (recording) record("#", getSeed());
@@ -424,9 +468,20 @@ window.app.atmosphere = atmosphere;
 window.app.idle = false;
 window.app.idleRate = 1;
 window.app.nextLook = ({ seed, ring, ...values } = {}) => {
+  // The values given are part of the new look, so the spores change to all of it on their own schedules.
+  const before = { colors: colors.map((c) => c.clone()), crust: eased.crust, size: eased.size };
+  nextLookPending = true;
   if (seed) loadSeed(String(seed));
+  nextLookPending = false;
   if (ring !== undefined) paceTime = (Math.floor(paceTime / 26) + ring) * 26;
+  const wasWildness = params.wildness();
   for (const [k, v] of Object.entries(values)) params[k]?.set(v);
+  // A wildness given sets the physics it stands for (as the slider does), at the pace its jump calls for.
+  if (values.wildness !== undefined) {
+    applyWildness(values.wildness, false);
+    springSlow = 1 + 4 * Math.max(0, Math.abs(values.wildness - wasWildness) - 0.25);
+  }
+  staggerChange(before);
 };
 
 // The microscope's scale bar: a short white line in the corner, faded in with the look.
@@ -494,8 +549,23 @@ function endBud() {
 // Colonies: with more than one, their centres sit round a slowly turning, tilted ring whose radius swells and
 // shrinks: apart for a while, then they drift together and merge, then pull apart again (each spore follows its own
 // colony's centre, so a merged mass splits back along its colonies, streaked with each other's colours).
+// A change in the number of colonies never jumps: the colonies draw together into one place, the count changes
+// there (each spore's colony colour then changes on its own schedule, see staggerChange), and they spread out again.
+const colonyMix = { shown: 1, spread: 0, velocity: 0 };
 function updateColonies(simTime) {
-  const k = params.colonies();
+  const want = params.colonies();
+  if (colonyMix.shown === 1) colonyMix.spread = colonyMix.velocity = 0;
+  const goal = want === colonyMix.shown ? 1 : 0;
+  const rate = 0.8;
+  colonyMix.velocity += ((goal - colonyMix.spread) * rate * rate - 2 * rate * colonyMix.velocity) * STEP;
+  colonyMix.spread = Math.max(0, colonyMix.spread + colonyMix.velocity * STEP);
+  if (want !== colonyMix.shown && colonyMix.spread < 0.03) {
+    spores.uniforms.prevColonies.value = colonyMix.shown;
+    spores.uniforms.colonyAge.value = recording ? 0 : 100;
+    colonyMix.shown = want;
+    colonyMix.spread = colonyMix.velocity = 0;
+  }
+  const k = colonyMix.shown;
   const c = spores.simUniforms.centres.value;
   spores.simUniforms.colonies.value = k;
   if (k === 1) {
@@ -506,7 +576,7 @@ function updateColonies(simTime) {
   const u = 0.5 + 0.5 * Math.sin((simTime * Math.PI * 2) / 26 - Math.PI / 2);
   const near = k === 2 ? 0.5 : 0.55;
   const far = k === 2 ? 1.2 : 1.15;
-  const spread = far + (near - far) * smoothstep01((u - 0.15) / 0.45);
+  const spread = (far + (near - far) * smoothstep01((u - 0.15) / 0.45)) * colonyMix.spread;
   // The ring turns in the plane facing the camera (in the colony's own space), so no colony hides behind another.
   const turn = simTime * 0.12;
   _view.copy(camera.position).sub(controls.target).applyMatrix3(_rot.setFromMatrix4(_inv.copy(spores.mesh.matrixWorld).invert())).normalize();
@@ -532,7 +602,7 @@ const smoothstep01 = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 const IDLE_AFTER = 5000;
 const ORBIT_MID = (67.5 * Math.PI) / 180;
 const ORBIT_SWING = (32.5 * Math.PI) / 180;
-const idle = { last: performance.now(), amount: 0, phi: 0, psi: 0, started: false, time: 0 };
+const idle = { last: performance.now(), amount: 0, phi: 0, psi: 0, started: false, time: 0, aimVelocity: new Vector3(), distanceVelocity: 0 };
 for (const type of ["pointerdown", "pointermove", "wheel", "keydown", "touchstart"])
   addEventListener(type, () => ((idle.last = performance.now()), (idle.amount = 0), (idle.started = false)), { capture: true, passive: true });
 const _off = new Vector3();
@@ -541,7 +611,7 @@ const _bulk = { center: new Vector3(), radius: 1 };
 const _ci = new Vector3();
 // The bulk of the colony (or colonies) in world space: round their centres, wide enough for each one's radius.
 function colonyBulk(out) {
-  const n = params.colonies();
+  const n = colonyMix.shown;
   const R = 1.05 * Math.cbrt(1 / n) + 0.1;
   const c = spores.simUniforms.centres.value;
   out.center.set(0, 0, 0);
@@ -549,8 +619,27 @@ function colonyBulk(out) {
   out.center.divideScalar(n);
   let far = 0;
   for (let i = 0; i < n; i++) far = Math.max(far, _ci.copy(c[i]).applyMatrix4(spores.mesh.matrixWorld).distanceTo(out.center));
-  out.radius = far + R;
+  // Wilder colonies reach further out with their arms.
+  out.radius = (far + R) * (1 + 0.6 * Math.max(0, eased.wildness - 0.3));
   return out;
+}
+// The bulk the camera frames and focuses on, following the colony's on a gentle spring so neither ever jumps.
+const bulk = { center: new Vector3(), radius: 1.2, centerVelocity: new Vector3(), radiusVelocity: 0, started: false };
+const _bulkRaw = { center: new Vector3(), radius: 1 };
+const _bulkPull = new Vector3();
+function updateBulk(wall) {
+  colonyBulk(_bulkRaw);
+  if (!bulk.started) {
+    bulk.center.copy(_bulkRaw.center);
+    bulk.radius = _bulkRaw.radius;
+    bulk.started = true;
+  }
+  const rate = 0.7;
+  _bulkPull.copy(_bulkRaw.center).sub(bulk.center).multiplyScalar(rate * rate).addScaledVector(bulk.centerVelocity, -2 * rate);
+  bulk.centerVelocity.addScaledVector(_bulkPull, wall);
+  bulk.center.addScaledVector(bulk.centerVelocity, wall);
+  bulk.radiusVelocity += ((_bulkRaw.radius - bulk.radius) * rate * rate - 2 * rate * bulk.radiusVelocity) * wall;
+  bulk.radius += bulk.radiusVelocity * wall;
 }
 const _dir = new Vector3();
 const _goal = new Vector3();
@@ -589,7 +678,8 @@ function focusPuller(wall) {
   }
 }
 function updateFocus(wall) {
-  colonyBulk(_bulkFocus);
+  _bulkFocus.center.copy(bulk.center);
+  _bulkFocus.radius = bulk.radius;
   const floaty = idle.amount > 0;
   if (floaty) focusPuller(wall * params.cameraSpeed() * (window.app.idleRate ?? 1));
   else focus.spot = params.focus();
@@ -633,6 +723,8 @@ function updateIdleOrbit(wall) {
   if (!on) {
     idle.amount = 0;
     idle.started = false;
+    idle.aimVelocity.set(0, 0, 0);
+    idle.distanceVelocity = 0;
     return;
   }
   idle.amount = Math.min(1, idle.amount + wall / 3);
@@ -645,18 +737,25 @@ function updateIdleOrbit(wall) {
   _e2.crossVectors(_lightAxis, _e1);
   // Floaty: the target eases onto the colony's bulk with a slow drift, and the distance onto one that frames it,
   // breathing between a close fill and a looser view.
-  colonyBulk(_bulk);
+  _bulk.center.copy(bulk.center);
+  _bulk.radius = bulk.radius;
   idle.time += wall * k;
   const t = idle.time;
   _drift.set(Math.sin(t * 0.21) + 0.6 * Math.sin(t * 0.47 + 1.3), Math.sin(t * 0.17 + 2.1) + 0.6 * Math.sin(t * 0.39), Math.sin(t * 0.23 + 4.2) + 0.6 * Math.sin(t * 0.43 + 0.7)).multiplyScalar(0.06 * _bulk.radius);
-  controls.target.lerp(_drift.add(_bulk.center), 1 - Math.exp(-wall * 0.35 * k));
+  // The aim and the distance follow springs (from rest when the idle camera takes over), so nothing jumps.
+  const aimRate = 0.6 * k;
+  _drift.add(_bulk.center).sub(controls.target).multiplyScalar(aimRate * aimRate).addScaledVector(idle.aimVelocity, -2 * aimRate);
+  idle.aimVelocity.addScaledVector(_drift, wall);
+  controls.target.addScaledVector(idle.aimVelocity, wall);
   const halfFov = Math.min(camera.fov, (2 * Math.atan(Math.tan((camera.fov * Math.PI) / 360) * camera.aspect) * 180) / Math.PI) * (Math.PI / 360);
   // How much room round the bulk: from a close fill with a margin left (1.2) to a looser view (1.7).
   const fill = 1.45 + 0.2 * Math.sin(t * 0.11 + 0.8) + 0.05 * Math.sin(t * 0.37);
   const fitDistance = Math.min(controls.maxDistance, Math.max(controls.minDistance, (_bulk.radius * fill) / Math.sin(halfFov)));
   _off.copy(camera.position).sub(controls.target);
   const r0 = _off.length();
-  const r = r0 + (fitDistance - r0) * (1 - Math.exp(-wall * 0.3 * k));
+  const distanceRate = 0.5 * k;
+  idle.distanceVelocity += ((fitDistance - r0) * distanceRate * distanceRate - 2 * distanceRate * idle.distanceVelocity) * wall;
+  const r = r0 + idle.distanceVelocity * wall;
   _dir.copy(_off).divideScalar(r0);
   if (!idle.started) {
     // Join the path where the camera is (its angle from the light clamped into the swing).
@@ -746,10 +845,25 @@ function updateSporulation(dt) {
   f.sporeChance.value = 0.5;
 }
 
+// A new colony's colours, crust and grain size reach the spores at different moments and paces (see the spores'
+// vertex shader): the new values apply at once, the old ones stay as each spore's starting point.
+function staggerChange(before) {
+  const u = spores.uniforms;
+  const palette = PALETTES[params.palette()] ?? PALETTES.pollen;
+  colors.forEach((c, i) => c.set(palette[i]));
+  eased.crust = params.crust();
+  eased.size = params.size();
+  u.prevCrustColor.value.copy(before.colors[0]);
+  u.prevCrustColor2.value.copy(before.colors[1]);
+  u.prevCoreColor.value.copy(before.colors[2]);
+  u.prevCrust.value = before.crust;
+  u.prevSize.value = 0.011 * before.size;
+  u.changeAge.value = 0;
+}
 // Eased versions of what the panel sets: per simulation step (at the default speed, as fast as on wall-clock time),
 // so a view link replays them exactly; on wall-clock time while paused, so changes still show.
 const eased = {};
-const easedKeys = ["size", "crust", "turbulence", "scale", "cohesion", "bonds", "pressure", "drag", "blur", "tear", "breathe", "collisions", "halo", "beam", "haze", "dust"];
+const easedKeys = ["wildness", "size", "crust", "turbulence", "scale", "cohesion", "bonds", "pressure", "drag", "blur", "tear", "breathe", "collisions", "halo", "beam", "haze", "dust"];
 let micro = params.look() === "microscope" ? 1 : 0;
 const STUDIO_BG = new Color(BACKGROUND);
 const MICRO_BG = new Color("#3a3d41");
@@ -792,7 +906,7 @@ function applySimParams() {
 function simStep() {
   if (recording) recordEdits();
   ease(STEP / defaults.speed);
-  spores.simUniforms.offset.value.lerp(offsetTarget, 1 - Math.exp(-(STEP / defaults.speed) * 1.1));
+  easeOffset(STEP / defaults.speed);
   applySimParams();
   simTime += STEP;
   simSteps++;
@@ -801,14 +915,38 @@ function simStep() {
   updateSporulation(STEP * pace);
   updatePulses(STEP, pace);
   updateColonies(paceTime);
-  if (params.colonies() === 1) updateBud(STEP * pace, pace);
+  if (colonyMix.shown === 1 && params.colonies() === 1) updateBud(STEP * pace, pace);
   else endBud();
   flowTime += STEP * pace * params.flow() * 0.25;
   spores.step(STEP, simTime, flowTime);
 }
+// The physics settings (and the current's place in noise space) follow a critically damped spring instead: they
+// start gently, move smoothly and settle in about 4 s without overshooting, so a calm colony doesn't snap back
+// into a ball when the wild one before it lets go.
+const SPRING_KEYS = new Set(["wildness", "turbulence", "scale", "cohesion", "bonds", "pressure", "drag", "tear", "breathe", "collisions"]);
+const SPRING = 1.1;
+const easedVelocity = {};
 function ease(dt) {
   const k = 1 - Math.exp(-dt * 2.5);
-  for (const key of easedKeys) eased[key] += (params[key]() - eased[key]) * k;
+  for (const key of easedKeys) {
+    if (!SPRING_KEYS.has(key)) {
+      eased[key] += (params[key]() - eased[key]) * k;
+      continue;
+    }
+    const v = (easedVelocity[key] ?? 0) + ((params[key]() - eased[key]) * (SPRING / springSlow) ** 2 - (2 * SPRING / springSlow) * (easedVelocity[key] ?? 0)) * dt;
+    easedVelocity[key] = v;
+    eased[key] += v * dt;
+  }
+}
+const OFFSET_SPRING = 0.9;
+const offsetVelocity = new Vector3();
+const _offsetPull = new Vector3();
+function easeOffset(dt) {
+  const offset = spores.simUniforms.offset.value;
+  const rate = OFFSET_SPRING / springSlow;
+  _offsetPull.copy(offsetTarget).sub(offset).multiplyScalar(rate * rate).addScaledVector(offsetVelocity, -2 * rate);
+  offsetVelocity.addScaledVector(_offsetPull, dt);
+  offset.addScaledVector(offsetVelocity, dt);
 }
 let lastNow = performance.now();
 let lastShown = "";
@@ -976,6 +1114,8 @@ render(({ time, dt }) => {
   // The look eases between studio and microscope (on wall-clock time).
   micro += ((params.look() === "microscope" ? 1 : 0) - micro) * (1 - Math.exp(-wall * 3));
   u.microscope.value = micro;
+  u.changeAge.value += wall / Math.sqrt(springSlow);
+  u.colonyAge.value += wall;
   u.translucency.value = params.translucency();
   u.detail.value = params.detail();
   pipeline.saturation = 1.45 * (1 - micro);
@@ -991,6 +1131,7 @@ render(({ time, dt }) => {
   atmosphere.time = time;
   // Sharp a little in front of the colony's middle, so its near side is crisp and its far side and the air soften.
   const aperture = 0.05 * params.focusBlur();
+  updateBulk(wall);
   updateFocus(wall);
   pipeline.dof.focus = focus.value;
   pipeline.dof.aperture = aperture;
@@ -1023,7 +1164,7 @@ render(({ time, dt }) => {
   // grains' light eases over a few frames); then the still settles again.
   if (!isRunning()) {
     const shown = RECORDED.map((k) => params[k]()).join() + easedKeys.map((k) => eased[k].toFixed(4)).join() + colors.map((c) => c.getHexString()).join() + micro.toFixed(4);
-    if (shown !== lastShown) pausedSettle = 20;
+    if (shown !== lastShown || spores.uniforms.changeAge.value < 8 || spores.uniforms.colonyAge.value < 4 || colonyMix.shown !== params.colonies()) pausedSettle = 20;
     lastShown = shown;
     if (pausedSettle > 0) {
       pausedSettle--;

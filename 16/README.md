@@ -16,7 +16,11 @@ and pull apart again, each spore going back to its own colony, streaked with the
 camera-facing impostor spheres shaded through the shared pipeline, each lit by one shadow lookup of its own.
 
 Randomizing moves the current to a new place in noise space and reshuffles the look, so the old colony swirls itself
-into the new one instead of cutting.
+into the new one instead of cutting. Its colours, crust and grain size reach the spores at different
+moments and paces (by clump, with each spore's own offset), so the change spreads through the mass in patches. Nothing jumps: the physics and the current follow gentle
+springs, slower the bigger the change (up to about 15 s for the most extreme); a change in the number of colonies draws
+them together first and spreads them out again, and several colonies always go back to one before splitting again; and auto change waits for a change to settle before counting toward
+the next.
 
 Controls: drag to orbit (freely, over and under the colony: the camera's up turns with it), scroll to zoom, R for a
 new colony. While paused, every drag orbits. Hovering stirs the spores under the pointer; clicking a
@@ -24,7 +28,8 @@ colony puffs spores out, dragging one pulls a handful out and stretches the mass
 button (long-press on touch) gathers spores toward the pointer and flings them out on release. L copies a link to the
 current view. Focus (slider, or Shift + scroll) moves the focal plane through the colony, from its front to its back. The panel sets the number and size of the spores, the palette, the crust, how translucent the grains are and how much spore detail they show (oval
 shapes; up close, a net and a furrow on the crust grains, spines on the dark ones), the studio or microscope look,
-the light beam, haze and dust, and the physics: colonies, sorting, speed, pace (how fast the colony lives on its own: its current, pulses, buds and
+the light beam, haze and dust, and the physics: wildness (from a calm, rounded blob to a wild mass stretching into arms, pulsing and
+bursting more; randomizing alternates calmer and wilder colonies, rarely the extremes), colonies, sorting, speed, pace (how fast the colony lives on its own: its current, pulses, buds and
 bursts, while the physics and anything done to it run at speed), flow, turbulence, cohesion, bonds, pressure,
 tear, pulses, sporulation and budding. Auto change brings a new colony every 10 seconds;
 randomizing, pausing or any interaction starts the count over. After 5 seconds without input the camera floats into

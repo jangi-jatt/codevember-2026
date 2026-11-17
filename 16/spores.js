@@ -977,12 +977,20 @@ function createSpores(renderer, random) {
     crustColor: { value: new Color("#f2b10c") },
     crustColor2: { value: new Color("#e8780a") },
     coreColor: { value: new Color("#0d0c0b") },
+    prevCrustColor: { value: new Color("#f2b10c") },
+    prevCrustColor2: { value: new Color("#e8780a") },
+    prevCoreColor: { value: new Color("#0d0c0b") },
+    prevCrust: { value: 0.5 },
+    prevSize: { value: GRAIN },
+    prevColonies: { value: 1 },
+    colonyAge: { value: 100 },
+    changeAge: { value: 100 },
     crustRough: { value: 0.68 },
     coreRough: { value: 0.55 },
   };
   const material = new PipelineMaterial({
     uniforms,
-    varyings: { vSpore: "vec4", vQuad: "vec2", vAxis: "vec3", vPix: "float", vColony: "float", vLit: "float", vThrough: "float" },
+    varyings: { vSpore: "vec4", vQuad: "vec2", vAxis: "vec3", vPix: "float", vColony: "float", vLit: "float", vThrough: "float", vChange: "float", vColonyPrev: "float", vColonyChange: "float" },
     vertexPars: /* glsl */ `
       uniform sampler2D tPos;
       uniform sampler2D tVel;
@@ -992,6 +1000,12 @@ function createSpores(renderer, random) {
       // Per grain: (key light at its lit side, light scattered through the mass to it), from the light pass.
       uniform sampler2D tLight;
       uniform float crust;
+      // The look before the last change, and seconds since it.
+      uniform float prevCrust;
+      uniform float prevSize;
+      uniform float prevColonies;
+      uniform float colonyAge;
+      uniform float changeAge;
       uniform float colonies;
       uniform float microscope;
       uniform float detail;
@@ -1011,7 +1025,11 @@ function createSpores(renderer, random) {
         vec4 d = texelFetch(tPos, c, 0);
         vec4 meta = texelFetch(tMeta, c, 0);
         float h = sporeHash(float(gl_InstanceID) * 0.618);
-        float th = mix(1.05, -0.05, crust);
+        // A new colony's look reaches each spore on its own schedule: a start shared loosely by its clump, its own
+        // offset and its own pace, so the change spreads through the mass in patches instead of all at once.
+        float delay = 0.8 * fract(sin(mod(meta.x, 911.0) * 0.731 + 0.4) * 43758.5453) + 0.9 * fract(h * 13.7 + 0.3);
+        float change = smoothstep(delay, delay + 0.5 + 0.9 * fract(h * 7.9 + 0.6), changeAge);
+        float th = mix(1.05, -0.05, mix(prevCrust, crust, change));
         // A spore's class (dark or crust) is its own and never changes: its patch, shifted by its colony (as in the
         // simulation's baseDye). Colours mix by grains moving among each other; the mixed dye only tints the crust.
         float colony = min(floor(fract(sin(mod(meta.x, 977.0) * 0.1271 + 1.7) * 43758.5453) * colonies), colonies - 1.0);
@@ -1020,7 +1038,7 @@ function createSpores(renderer, random) {
         float share = texelFetch(tState, c, 0).w;
         // Crust grains a little larger than the dark ones under them; every spore its own size.
         float scl = texelFetch(tState, c, 0).y;
-        float s = sporeSize * (0.7 + 0.6 * h) * mix(0.95, 1.05, yellow) * scl;
+        float s = mix(prevSize, sporeSize, change) * (0.7 + 0.6 * h) * mix(0.95, 1.05, yellow) * scl;
         // Previous pose: last frame's for the velocity that reprojects AO/GI; for motion blur, the last move scaled by
         // the shutter and capped near a grain's length so fast grains soften instead of drawing hairs (halved: the
         // blur smears from -v to +v).
@@ -1063,6 +1081,10 @@ function createSpores(renderer, random) {
         if (!pipelinePrevPose) {
           vAxis = vec3(ax, elong);
           vColony = colonies < 1.5 ? -1.0 : colony;
+          // Its colony under the count before the last change, for its colour to change from.
+          float colonyPrev = min(floor(fract(sin(mod(meta.x, 977.0) * 0.1271 + 1.7) * 43758.5453) * prevColonies), prevColonies - 1.0);
+          vColonyPrev = prevColonies < 1.5 ? -1.0 : colonyPrev;
+          vColonyChange = smoothstep(delay, delay + 0.5 + 0.9 * fract(h * 7.9 + 0.6), colonyAge);
         #ifndef PIPELINE_SHADOW
           vec2 light = texelFetch(tLight, c, 0).rg;
           vLit = light.r;
@@ -1070,6 +1092,7 @@ function createSpores(renderer, random) {
         #endif
           // The grain's radius in pixels, to fade out surface detail it is too small to show.
           vPix = pix;
+          vChange = change;
         }
         return centre + (right * qs.x + up * qs.y) * s;
       }
@@ -1078,12 +1101,23 @@ function createSpores(renderer, random) {
       uniform vec3 crustColor;
       uniform vec3 crustColor2;
       uniform vec3 coreColor;
+      uniform vec3 prevCrustColor;
+      uniform vec3 prevCrustColor2;
+      uniform vec3 prevCoreColor;
       uniform float crustRough;
       uniform float coreRough;
       uniform float microscope;
       uniform float ornament;
       uniform float detail;
       uniform float translucency;
+      // A crust grain's colour by its colony (-1: one colony, shading between the palette's two crust colours).
+      vec3 colonyCrust(float colony, vec3 c1, vec3 c2, float shade) {
+        if (colony < -0.5) return mix(c1, c2, shade);
+        // The third colony: halfway between the two crust colours, pushed more saturated (never toward white).
+        vec3 mid = mix(c1, c2, 0.5);
+        vec3 own = colony < 0.5 ? c1 : colony < 1.5 ? c2 : mix(vec3(dot(mid, vec3(0.2126, 0.7152, 0.0722))), mid, 1.5);
+        return mix(own, own * 0.6, shade);
+      }
       vec3 sporeHash33(vec3 p) {
         p = fract(p * vec3(0.1031, 0.1030, 0.0973));
         p += dot(p, p.yxz + 33.33);
@@ -1140,19 +1174,15 @@ function createSpores(renderer, random) {
         // Crust grains range from the light colour to the deep one.
         // One colony: its crust shades between the palette's two crust colours. Several: each colony's crust is its own
         // colour (main, deep, pale), shading toward a deeper version of it; the dark grains are the same in all.
-        vec3 crustAlbedo;
+        vec3 cCrust = mix(prevCrustColor, crustColor, vChange);
+        vec3 cCrust2 = mix(prevCrustColor2, crustColor2, vChange);
+        vec3 cCore = mix(prevCoreColor, coreColor, vChange);
         float shade = vSpore.y * vSpore.y;
-        if (vColony < -0.5) crustAlbedo = mix(crustColor, crustColor2, shade);
-        else {
-          // The third colony: halfway between the two crust colours, pushed more saturated (never toward white).
-          vec3 mid = mix(crustColor, crustColor2, 0.5);
-          vec3 own = vColony < 0.5 ? crustColor : vColony < 1.5 ? crustColor2 : mix(vec3(dot(mid, vec3(0.2126, 0.7152, 0.0722))), mid, 1.5);
-          crustAlbedo = mix(own, own * 0.6, shade);
-        }
+        vec3 crustAlbedo = mix(colonyCrust(vColonyPrev, cCrust, cCrust2, shade), colonyCrust(vColony, cCrust, cCrust2, shade), vColonyChange);
         // The shade variation leans a little more saturated as it deepens.
         float luma = dot(crustAlbedo, vec3(0.2126, 0.7152, 0.0722));
         crustAlbedo = max(mix(vec3(luma), crustAlbedo, 1.0 + 0.35 * shade), 0.0);
-        s.albedo = mix(coreColor * (0.7 + 0.6 * vSpore.y), crustAlbedo, c);
+        s.albedo = mix(cCore * (0.7 + 0.6 * vSpore.y), crustAlbedo, c);
         s.roughness = mix(coreRough, crustRough, c);
         s.specular = mix(0.35, 0.6, c);
         // Ambient occlusion from depth in the mass: grains under others see little of the surroundings.
