@@ -15,6 +15,37 @@ import { days, year, event } from "./days.js";
 
 const query = new URLSearchParams(window.location.search);
 
+// No day plays sound in a background tab: every AudioContext a day creates, and every <audio>/<video> it plays, is
+// silenced while the tab is hidden and only what was playing comes back with it (a day paused or muted stays so).
+{
+  const contexts = new Set();
+  const media = new Set();
+  const NativeContext = window.AudioContext ?? window.webkitAudioContext;
+  if (NativeContext) {
+    window.AudioContext = class extends NativeContext {
+      constructor(...args) {
+        super(...args);
+        contexts.add(this);
+      }
+    };
+  }
+  const nativePlay = HTMLMediaElement.prototype.play;
+  HTMLMediaElement.prototype.play = function (...args) {
+    media.add(this);
+    return nativePlay.apply(this, args);
+  };
+  const silenced = new Set();
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      for (const ctx of contexts) if (ctx.state === "running") silenced.add(ctx) && ctx.suspend().catch(() => {});
+      for (const el of media) if (!el.paused) silenced.add(el) && el.pause();
+    } else {
+      for (const item of silenced) item instanceof HTMLMediaElement ? item.play().catch(() => {}) : item.resume().catch(() => {});
+      silenced.clear();
+    }
+  });
+}
+
 // UI stuff
 
 // One signal per key, with guspira's $ helpers (options as in createParams).
