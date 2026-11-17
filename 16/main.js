@@ -1,4 +1,4 @@
-import { fromDefaults, renderer, camera, controls as sharedControls, render, onResize, onRandomize, applyUrlState, keysHelp, setDay, showHint, loadingStep, addKey, setRunning, isRunning, getSeed, loadSeed, addActionButton, onPause, showSoundHint } from "common";
+import { fromDefaults, renderer, camera, controls as sharedControls, render, onResize, onRandomize, applyUrlState, keysHelp, setDay, showHint, loadingStep, addKey, setRunning, isRunning, getSeed, loadSeed, randomize, addActionButton, onPause, showSoundHint } from "common";
 import { createSound } from "./sound.js";
 import { GUI, signal } from "guspira";
 import { Scene, Vector3, Vector2, Color, Matrix4, Matrix3, Raycaster, WebGLRenderTarget, HalfFloatType, RawShaderMaterial, GLSL3, BufferGeometry, Float32BufferAttribute, Mesh, OrthographicCamera, Quaternion } from "three";
@@ -16,7 +16,14 @@ const BACKGROUND = "#1e2226";
 // The query this page was opened with: a view link replays from it (see viewLink).
 const query = new URLSearchParams(location.search);
 const LINK_KEYS = ["step", "ev", "cam", "turn", "paused", "build"];
-const replaySteps = Math.min(36000, Math.max(0, Math.round(Number(query.get("step")) || 0)));
+const MAX_REPLAY = 36000;
+// Yields to the browser without setTimeout's throttling in a background tab.
+const yieldChannel = new MessageChannel();
+const yieldNow = () => new Promise((resolve) => {
+  yieldChannel.port1.onmessage = () => resolve();
+  yieldChannel.port2.postMessage(0);
+});
+const replaySteps = Math.min(MAX_REPLAY, Math.max(0, Math.round(Number(query.get("step")) || 0)));
 // The seed the page started from (a link from a page opened without ?seed= carries it as origin). The stream restarts
 // here, so the build depends only on the seed, not on what modules drew while loading.
 const startSeed = query.get("seed") ? getSeed() : (query.get("origin") ?? getSeed());
@@ -143,12 +150,12 @@ const studio = load.studio.track(
 );
 
 const gui = new GUI(setDay(), document.querySelector("#gui-container"), { expanded: false });
-// The panel, by what each setting does. The randomized controls keep their order (seeds replay them in turn).
+// The panel, by what each setting does. Randomizing draws the palette, crust, wildness (which sets the physics),
+// colonies and sorting from the seed alone, so a seed always gives the same colony.
 // Look: the colony's colours and its grains.
 gui.addSection("Look");
 gui.addSelect("Palette", params.palette, Object.keys(PALETTES)).randomize = () => {
   const weights = { pollen: 4, saffron: 2, rust: 2, lichen: 1.5, coral: 1.5, frost: 1, ultraviolet: 1, verdigris: 1 };
-  delete weights[params.palette()];
   let r = Math.random() * Object.values(weights).reduce((a, b) => a + b);
   for (const [k, w] of Object.entries(weights)) if ((r -= w) < 0) return params.palette.set(k);
 };
@@ -176,17 +183,15 @@ function applyWildness(w, randomized) {
     params[k].set(round(randomized ? v * (1 + (Math.random() * 2 - 1) * 0.08) : v));
   }
 }
-let wildSide = 0;
 function randomWildness() {
-  // Alternate sides; the distance from the middle leans small, so the extremes are rare.
-  wildSide = 1 - wildSide;
+  // Either side of the middle, leaning toward it, so the extremes are rare.
+  const wild = Math.random() < 0.5;
   const d = 0.1 + 0.4 * Math.pow(Math.random(), 2);
-  return round(wildSide ? 0.5 + d : 0.5 - d);
+  return round(wild ? 0.5 + d : 0.5 - d);
 }
 gui.addSlider("Wildness", params.wildness, 0, 1, 0.01, { onChange: (v) => applyWildness(v, false) }).randomize = () => params.wildness.set(randomWildness());
-// One, or two or three that drift apart, meet, merge and split again; several always go back to one before the next
-// split, so a change never goes from two straight to three.
-gui.addSlider("Colonies", params.colonies, 1, 3, 1).randomize = () => params.colonies.set(params.colonies() > 1 ? 1 : Math.random() < 0.45 ? 1 : Math.random() < 0.6 ? 2 : 3);
+// One, or two or three that drift apart, meet, merge and split again.
+gui.addSlider("Colonies", params.colonies, 1, 3, 1).randomize = () => params.colonies.set(Math.random() < 0.45 ? 1 : Math.random() < 0.6 ? 2 : 3);
 // How much spores drift toward their own colour: 0 lets the stirring mix them freely, higher gathers the colours into
 // patches and streams (never fully apart).
 gui.addSlider("Sorting", params.sorting, 0, 2, 0.01).randomize = () => params.sorting.set(round(0.3 + 0.7 * Math.random()));
@@ -201,16 +206,16 @@ gui.addSlider("Speed", params.speed, 0.1, 2, 0.01, { randomizable: false });
 gui.addSlider("Pace", params.pace, 0.05, 1, 0.01, { randomizable: false });
 // How fast the current changes, how hard it stirs, and how big its swirls are.
 gui.addSlider("Flow", params.flow, 0, 2, 0.01, { randomizable: false });
-gui.addSlider("Turbulence", params.turbulence, 0, 3, 0.01).randomize = () => params.turbulence.set(round(0.7 + 0.8 * Math.random()));
-gui.addSlider("Scale", params.scale, 0.4, 2.5, 0.01).randomize = () => params.scale.set(round(0.8 + 0.6 * Math.random()));
+gui.addSlider("Turbulence", params.turbulence, 0, 3, 0.01, { randomizable: false });
+gui.addSlider("Scale", params.scale, 0.4, 2.5, 0.01, { randomizable: false });
 
 // Body: what holds the mass together (goo), the bead clumps (bonds) and how easily they tear (their bonds snap when
 // stretched, and grow back when the pieces meet again), what stops it packing (pressure, collisions), and how thick the
 // medium it floats in is (drag).
 gui.addSection("Body");
-gui.addSlider("Cohesion", params.cohesion, 0, 3, 0.01).randomize = () => params.cohesion.set(round(0.7 + 0.6 * Math.random()));
-gui.addSlider("Bonds", params.bonds, 0, 3, 0.01).randomize = () => params.bonds.set(round(0.6 + 0.8 * Math.random()));
-gui.addSlider("Tear", params.tear, 0, 1, 0.01).randomize = () => params.tear.set(round(0.3 + 0.5 * Math.random()));
+gui.addSlider("Cohesion", params.cohesion, 0, 3, 0.01, { randomizable: false });
+gui.addSlider("Bonds", params.bonds, 0, 3, 0.01, { randomizable: false });
+gui.addSlider("Tear", params.tear, 0, 1, 0.01, { randomizable: false });
 gui.addSlider("Pressure", params.pressure, 0.2, 3, 0.01, { randomizable: false });
 gui.addSlider("Collisions", params.collisions, 0, 3, 0.01, { randomizable: false });
 gui.addSlider("Drag", params.drag, 0.1, 3, 0.01, { randomizable: false });
@@ -218,9 +223,9 @@ gui.addSlider("Drag", params.drag, 0.1, 3, 0.01, { randomizable: false });
 // Life: how strongly the colony swells in sudden, irregular pulses; how often a patch of ripe crust bursts in a puff of
 // spores (they grow back beside clump-mates); how often it buds (a lobe swells, pinches off, floats away and comes back).
 gui.addSection("Life");
-gui.addSlider("Pulse", params.breathe, 0, 1, 0.01).randomize = () => params.breathe.set(round(0.2 + 0.6 * Math.random()));
-gui.addSlider("Sporulation", params.sporulation, 0, 4, 0.01).randomize = () => params.sporulation.set(round(0.5 + 1.5 * Math.random()));
-gui.addSlider("Budding", params.budding, 0, 3, 0.01).randomize = () => params.budding.set(round(0.5 + 1.5 * Math.random()));
+gui.addSlider("Pulse", params.breathe, 0, 1, 0.01, { randomizable: false });
+gui.addSlider("Sporulation", params.sporulation, 0, 4, 0.01, { randomizable: false });
+gui.addSlider("Budding", params.budding, 0, 3, 0.01, { randomizable: false });
 
 // Touch: how hard hovering stirs the spores, and how hard a click blows a puff of them out.
 gui.addSection("Touch");
@@ -371,7 +376,19 @@ renderer.domElement.addEventListener(
   (e) => {
     // While paused every drag orbits; the colony can't respond anyway.
     if (!isRunning()) return;
+    // A second finger: unless the first is already pulling or gathering, it's a pinch or orbit for the camera.
+    if (press.active && press.pointer !== e.pointerId) {
+      if (press.mode === "press") {
+        clearTimeout(press.longPress);
+        press.mode = null;
+        controls.enabled = true;
+      }
+      return;
+    }
+    press.pointer = e.pointerId;
     toNdc(e, press.ndc);
+    // Gathering aims where the finger (or pointer) is, even without a hover before the press.
+    pointer.ndc.copy(press.ndc);
     Object.assign(press, { x: e.clientX, y: e.clientY, t: performance.now(), mode: null, charge: 0, active: true });
     const hit = colonyUnder(press.ndc);
     if (e.button === 2) {
@@ -381,15 +398,22 @@ renderer.domElement.addEventListener(
       // A click or a drag; which one is decided when it moves.
       press.mode = "press";
       press.depth = hit.t;
-      controls.enabled = false;
-      if (e.pointerType === "touch") press.longPress = setTimeout(() => press.mode === "press" && (press.mode = "attract"), 450);
+      // On touch the camera keeps the finger until it pulls, so a second finger can still pinch.
+      if (e.pointerType !== "touch") controls.enabled = false;
+      if (e.pointerType === "touch")
+        press.longPress = setTimeout(() => {
+          if (press.mode !== "press") return;
+          press.mode = "attract";
+          controls.enabled = false;
+        }, 450);
     }
   },
   { capture: true },
 );
 renderer.domElement.addEventListener("pointermove", (e) => {
-  if (press.mode === "press" && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) {
+  if (e.pointerId === press.pointer && press.mode === "press" && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 6) {
     press.mode = "grab";
+    controls.enabled = false;
     clearTimeout(press.longPress);
     const u = spores.simUniforms;
     raycaster.setFromCamera(press.ndc, camera);
@@ -401,7 +425,7 @@ renderer.domElement.addEventListener("pointermove", (e) => {
 });
 // On window, so a release over the panel or outside the page still ends a drag.
 const endPress = (e) => {
-  if (!press.active) return;
+  if (!press.active || e.pointerId !== press.pointer) return;
   press.active = false;
   clearTimeout(press.longPress);
   const u = spores.simUniforms;
@@ -443,16 +467,44 @@ function fitView() {
   if (_fit.length() < distance) camera.position.copy(controls.target).addScaledVector(_fit.normalize(), distance);
 }
 const _fit = new Vector3();
+let wasPortrait = null;
 onResize((w, h, dpr) => {
   pipeline.setSize(w, h, dpr);
-  fitView();
+  // Only when the screen turns, so a resize (fullscreen, a window drag) keeps the zoom.
+  if ((w < h) !== wasPortrait) fitView();
+  wasPortrait = w < h;
 });
 
+// A new colony alternates calm and wild, never repeats the palette, and goes back to one colony after several: a seed
+// that breaks one of these is passed over for another (each seed's colony depends on the seed alone, so its url gives
+// it back).
+let lastLook = null;
+let rerolls = 0;
+// The look on screen, for each spore to change from: mid-change, partway from the last look to the new one.
+function shownLook() {
+  const u = spores.uniforms;
+  const t = Math.min(1, u.changeAge.value / 2.5);
+  const prev = [u.prevCrustColor.value, u.prevCrustColor2.value, u.prevCoreColor.value];
+  return {
+    colors: colors.map((c, i) => prev[i].clone().lerp(c, t)),
+    crust: u.prevCrust.value + (eased.crust - u.prevCrust.value) * t,
+    size: (u.prevSize.value / 0.011) * (1 - t) + eased.size * t,
+  };
+}
+const breaksRules = () =>
+  lastLook && (params.wildness() >= 0.5 === lastLook.wild || params.palette() === lastLook.palette || (lastLook.colonies > 1 && params.colonies() > 1));
 onRandomize(() => {
   // The look on screen before the change, for each spore to change from on its own schedule.
-  const before = recording && !nextLookPending ? { colors: colors.map((c) => c.clone()), crust: eased.crust, size: eased.size } : null;
-  const wasWildness = params.wildness();
+  const before = recording && !nextLookPending ? shownLook() : null;
+  const wasWildness = lastLook?.wildness ?? params.wildness();
   gui.randomizeAll();
+  if (recording && !nextLookPending && rerolls < 12 && breaksRules()) {
+    rerolls++;
+    randomize();
+    return;
+  }
+  rerolls = 0;
+  lastLook = { wild: params.wildness() >= 0.5, wildness: params.wildness(), palette: params.palette(), colonies: params.colonies() };
   applyWildness(params.wildness(), true);
   springSlow = 1 + 4 * Math.max(0, Math.abs(params.wildness() - wasWildness) - 0.25);
   // The transformation's sound lasts as long as the change looks to.
@@ -547,7 +599,7 @@ window.app.idle = false;
 window.app.idleRate = 1;
 window.app.nextLook = ({ seed, ring, ...values } = {}) => {
   // The values given are part of the new look, so the spores change to all of it on their own schedules.
-  const before = { colors: colors.map((c) => c.clone()), crust: eased.crust, size: eased.size };
+  const before = shownLook();
   nextLookPending = true;
   if (seed) loadSeed(String(seed));
   nextLookPending = false;
@@ -561,6 +613,7 @@ window.app.nextLook = ({ seed, ring, ...values } = {}) => {
   }
   sound.transform(Math.min(5, 2.5 * Math.sqrt(springSlow)), bulk.center);
   staggerChange(before);
+  lastLook = { wild: params.wildness() >= 0.5, wildness: params.wildness(), palette: params.palette(), colonies: params.colonies() };
 };
 
 // The microscope's scale bar: a short white line in the corner, faded in with the look.
@@ -982,7 +1035,6 @@ function applySimParams() {
   f.viscosity.value = 12;
   f.drag.value = 1.5 * eased.drag;
   f.tear.value = 0.1 * (1 - 0.85 * eased.tear);
-  f.lightObject.value.copy(globalUniforms.lightDirection.value).applyMatrix3(_rot.setFromMatrix4(_inv.copy(spores.mesh.matrixWorld).invert())).normalize();
   u.sporeSize.value = 0.011 * eased.size;
   u.crust.value = eased.crust;
   u.crustColor.value.copy(colors[0]);
@@ -1149,8 +1201,15 @@ function viewLink() {
   if (!query.get("seed")) url.searchParams.set("origin", startSeed);
   const r = (v) => Number(v.toFixed(4));
   url.searchParams.set("auto", "false");
-  url.searchParams.set("step", String(simSteps));
-  url.searchParams.set("ev", JSON.stringify(events));
+  // Past what a link replays, it keeps the current seed, settings and camera, but not the colony's history.
+  if (simSteps <= MAX_REPLAY) {
+    url.searchParams.set("step", String(simSteps));
+    url.searchParams.set("ev", JSON.stringify(events));
+  } else {
+    url.searchParams.set("seed", getSeed());
+    for (const k of RECORDED) url.searchParams.set(k, String(params[k]()));
+    console.warn("This session is too long to replay: the link gives its colony's settings, not its exact shape.");
+  }
   url.searchParams.set("cam", [...camera.position.toArray(), ...controls.target.toArray(), ...camera.up.toArray()].map(r).join(","));
   url.searchParams.set("turn", String(r(spores.mesh.rotation.y)));
   url.searchParams.set("paused", isRunning() ? "0" : "1");
@@ -1199,7 +1258,7 @@ gui.addButton("Copy view link (L)", copyViewLink);
     if (i % 30 === 29) {
       gl.finish();
       load.replay.set(i / replaySteps);
-      await new Promise((r) => setTimeout(r));
+      await yieldNow();
     }
   }
   applyEvents(replaySteps);
@@ -1209,6 +1268,7 @@ gui.addButton("Copy view link (L)", copyViewLink);
   if (linkBuild) buildPromise.then((b) => b !== linkBuild && console.warn(`This link was made with build ${linkBuild}; this is ${b}.`));
   snapshotParams();
   recording = true;
+  lastLook = { wild: params.wildness() >= 0.5, wildness: params.wildness(), palette: params.palette(), colonies: params.colonies() };
 }
 
 render(({ time, dt }) => {
@@ -1238,7 +1298,6 @@ render(({ time, dt }) => {
     simAcc = 4 * STEP;
   }
   simAcc -= steps * STEP;
-  f.viewObject.value.copy(camera.position).applyMatrix4(_inv.copy(spores.mesh.matrixWorld).invert()).normalize();
   // The look eases between studio and microscope (on wall-clock time).
   micro += ((params.look() === "microscope" ? 1 : 0) - micro) * (1 - Math.exp(-wall * 3));
   u.microscope.value = micro;

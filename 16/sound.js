@@ -24,6 +24,7 @@ const AHEAD = 0.3;
 // A Hann window; OVERLAP of them summed hold steady at OVERLAP / 2.
 const WINDOW = Float32Array.from({ length: 128 }, (_, i) => 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / 127));
 const rand = (a, b) => a + (b - a) * nativeRandom();
+const coarse = matchMedia("(pointer: coarse)").matches;
 
 export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url).href, onProgress, volume = 0.7, bed = 0.55 } = {}) {
   let ctx = null, master = null, bedGain = null, fx = null, reverb = null, noise = null, buffer = null;
@@ -125,7 +126,8 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
   // A 3D source at a world point, with its direct sound (dry) and a send to the room's reverb (wet).
   function panner(p, dry = 1, wet = 0.2) {
     const node = ctx.createPanner();
-    node.panningModel = "HRTF";
+    // HRTF on desktops; the cheaper equal-power panning on phones (the always-on voices are many).
+    node.panningModel = coarse ? "equalpower" : "HRTF";
     node.distanceModel = "inverse";
     node.refDistance = 4;
     node.rolloffFactor = 1;
@@ -150,9 +152,9 @@ export function createSound({ url = new URL("./sound/sound.mp3", import.meta.url
   function noiseSource(when, duration) {
     const source = ctx.createBufferSource();
     source.buffer = noise;
-    source.loop = duration > 1.9;
-    source.start(when, rand(0, 1.5), source.loop ? undefined : duration);
-    if (source.loop) source.stop(when + duration);
+    source.loop = true;
+    source.start(when, rand(0, noise.duration));
+    source.stop(when + duration);
     return source;
   }
   // A continuous noise voice (stirring, gathering) whose level and place follow the pointer.

@@ -14,7 +14,7 @@ import { loadSdf, prefetchSdf } from "./sdfAsset.js";
 import { Backdrop } from "./backdrop.js";
 import { createNoiseTexture } from "./noise.js";
 import { createSound } from "./sound.js";
-import { OrbitControls as FreeOrbitControls } from "./FreeOrbitControls.js";
+import { OrbitControls as FreeOrbitControls } from "modules/FreeOrbitControls.js";
 
 const BACKGROUND = 0x5f6268;
 

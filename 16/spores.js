@@ -256,7 +256,7 @@ out vec4 outColor;
 void main() { outColor = vec4(vWeight, vWeight * vVel); }
 `;
 
-// Fine grid: each spore spreads its grain volume over the 8 cells round it (trilinear), so no blur is needed.
+// Fine grid: each spore spreads its grain volume trilinearly over its 8 cells: a 2x2 point per z slice, a cell per fragment.
 const fineSplatVertex = /* glsl */ `
 precision highp float;
 ${defs}
@@ -268,6 +268,8 @@ uniform float colonies;
 uniform float crust;
 out float vWeight;
 out float vDye;
+out vec2 vFrac;
+flat out vec2 vBase;
 void main() {
   vec3 p = texelFetch(tPos, texelOf(gl_InstanceID), 0).xyz;
   vec4 st = texelFetch(tState, texelOf(gl_InstanceID), 0);
@@ -276,17 +278,38 @@ void main() {
   vec3 g = (p + BOXF) / (2.0 * BOXF) * GF - 0.5;
   vec3 base = floor(g);
   vec3 f = g - base;
-  vec3 c = vec3(float(gl_VertexID & 1), float((gl_VertexID >> 1) & 1), float(gl_VertexID >> 2));
-  vec3 cell = base + c;
-  vec3 w3 = mix(1.0 - f, f, c);
-  vWeight = grainVolume * scl * scl * scl * w3.x * w3.y * w3.z;
-  gl_PointSize = 1.0;
-  if (min(min(cell.x, cell.y), cell.z) < 0.0 || max(max(cell.x, cell.y), cell.z) > GF - 1.0) {
+  float cz = float(gl_VertexID);
+  float z = base.z + cz;
+  vWeight = grainVolume * scl * scl * scl * mix(1.0 - f.z, f.z, cz);
+  vFrac = f.xy;
+  vBase = base.xy;
+  gl_PointSize = 2.0;
+  if (z < 0.0 || z > GF - 1.0 || min(base.x, base.y) < -1.0 || max(base.x, base.y) > GF - 1.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     return;
   }
-  vec2 px = fineTileOf(cell.z) * GF + cell.xy + 0.5;
+  // The point's centre on the corner shared by its four cells.
+  vec2 px = fineTileOf(z) * GF + base.xy + 1.0;
   gl_Position = vec4(px / vec2(GF * TFX, GF * ${TFY}.0) * 2.0 - 1.0, 0.0, 1.0);
+}
+`;
+
+// A fine point's fragment is one of its four cells: its corner's share, nothing past the grid's edge (that's another tile).
+const fineSplatFragment = /* glsl */ `
+precision highp float;
+${defs}
+in float vWeight;
+in float vDye;
+in vec2 vFrac;
+flat in vec2 vBase;
+out vec4 outColor;
+void main() {
+  vec2 c = vec2(gl_PointCoord.x > 0.5 ? 1.0 : 0.0, gl_PointCoord.y > 0.5 ? 0.0 : 1.0);
+  vec2 cell = vBase + c;
+  if (min(cell.x, cell.y) < 0.0 || max(cell.x, cell.y) > GF - 1.0) discard;
+  vec2 w = mix(1.0 - vFrac, vFrac, c);
+  float weight = vWeight * w.x * w.y;
+  outColor = vec4(weight, weight * vDye, 0.0, 0.0);
 }
 `;
 
@@ -372,7 +395,6 @@ uniform vec3 burstDir;
 uniform vec3 burstCentre;
 uniform float burstStrength;
 uniform float burstRadius;
-uniform vec3 lightObject;
 uniform vec3 rayOrigin;
 uniform vec3 rayDir;
 uniform vec3 rayVel;
@@ -387,7 +409,6 @@ uniform vec3 sporeDir;
 uniform float sporeCone;
 uniform float sporeChance;
 uniform float stepId;
-uniform vec3 viewObject;
 uniform vec3 budDir;
 uniform vec3 budCentre;
 uniform float budNeck;
@@ -853,7 +874,7 @@ function createSpores(renderer, random) {
   const fineMaterial = new RawShaderMaterial({
     glslVersion: GLSL3,
     vertexShader: fineSplatVertex,
-    fragmentShader: splatFragment.replace("in vec3 vVel;", "in float vDye;").replace("vec4(vWeight, vWeight * vVel)", "vec4(vWeight, vWeight * vDye, 0.0, 0.0)"),
+    fragmentShader: fineSplatFragment,
     uniforms: fineUniforms,
     depthTest: false,
     depthWrite: false,
@@ -862,9 +883,9 @@ function createSpores(renderer, random) {
     blendSrc: OneFactor,
     blendDst: OneFactor,
   });
-  // Eight points per spore (one per cell corner), instanced by spore.
+  // Two points per spore (one per z slice), instanced by spore.
   const fineGeometry = new InstancedBufferGeometry();
-  fineGeometry.setAttribute("position", new BufferAttribute(new Float32Array(8 * 3), 3));
+  fineGeometry.setAttribute("position", new BufferAttribute(new Float32Array(2 * 3), 3));
   const finePoints = new Points(fineGeometry, fineMaterial);
   finePoints.frustumCulled = false;
   const fineScene = new Scene();
@@ -892,7 +913,6 @@ function createSpores(renderer, random) {
     bond: { value: 60 },
     drag: { value: 1.5 },
     centering: { value: 1.5 },
-    lightObject: { value: new Vector3(0, 1, 0) },
     rayOrigin: { value: new Vector3(0, 0, 100) },
     rayDir: { value: new Vector3(0, 0, -1) },
     rayVel: { value: new Vector3() },
@@ -920,7 +940,6 @@ function createSpores(renderer, random) {
     sporeCone: { value: 0.98 },
     sporeChance: { value: 0 },
     stepId: { value: 0 },
-    viewObject: { value: new Vector3(0, 0, 1) },
     budDir: { value: new Vector3(1, 0, 0) },
     budCentre: { value: new Vector3() },
     budNeck: { value: 0.6 },
