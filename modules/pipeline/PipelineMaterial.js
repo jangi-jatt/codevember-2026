@@ -192,6 +192,7 @@ struct Surface {
   vec3 anisotropyDirection; // anisotropy only: world-space direction in the surface plane
   float fiber; // thinSheet only: 0..1, how much the key lights the sheet as round fibres along fiberAxis (edge-on vanes)
   vec3 fiberAxis; // thinSheet only: world-space fibre direction
+  float shadow; // opt-in key visibility, 0..1, used instead of the per-pixel shadow lookup (< 0: look it up, the default)
 };
 
 #if defined(PIPELINE_DENOISED_SHADOWS) && (defined(OPAQUE) || defined(ALPHA_TO_COVERAGE))
@@ -257,6 +258,7 @@ void main() {
   s.anisotropyDirection = vec3(1.0, 0.0, 0.0);
   s.fiber = 0.0;
   s.fiberAxis = vec3(1.0, 0.0, 0.0);
+  s.shadow = -1.0;
 #ifdef PIPELINE_SURFACE
   surface(s);
 #endif
@@ -333,24 +335,27 @@ void main() {
   GIUpsample giU = GIUpsample(ivec2(0), ivec2(0), ivec2(0), ivec2(0), vec4(0.0), 0.0);
   if (shadowMaskEnabled > 0.5 || giEnabled > 0.5) giU = giUpsampleWeights(N, zTol);
   // Pixels the half-res mask has no match for (thin geometry) trace their own shadow.
-  float maskMatch = 0.0;
-  float shadow = 1.0;
-  if (shadowMaskEnabled > 0.5) {
-    shadow = giUpsampleApply(shadowMask, giU).a;
-    maskMatch = giU.match;
-  }
-  #ifdef PIPELINE_THIN_SHEET
-  // Thin sheets seen edge-on rarely match the half-res mask: their fallback is the noise-free kernel (the noisy
-  // PCSS read shows as grain without the mask's denoising), from the side the light reaches.
-  if (maskMatch < 0.05) {
-    vec3 nf = shadowTwoSided > 0.5 && dot(n, L) < 0.0 ? -n : n;
-    shadow = getShadowFixed(P, nf, max(4.0, shadowMinTexels));
+  float shadow = s.shadow;
+  if (s.shadow < 0.0) {
+    float maskMatch = 0.0;
+    shadow = 1.0;
+    if (shadowMaskEnabled > 0.5) {
+      shadow = giUpsampleApply(shadowMask, giU).a;
+      maskMatch = giU.match;
+    }
+    #ifdef PIPELINE_THIN_SHEET
+    // Thin sheets seen edge-on rarely match the half-res mask: their fallback is the noise-free kernel (the noisy
+    // PCSS read shows as grain without the mask's denoising), from the side the light reaches.
+    if (maskMatch < 0.05) {
+      vec3 nf = shadowTwoSided > 0.5 && dot(n, L) < 0.0 ? -n : n;
+      shadow = getShadowFixed(P, nf, max(4.0, shadowMinTexels));
+    }
+    #else
+    if (maskMatch < 0.05) shadow = getShadow(P, N);
+    #endif
   }
   #else
-  if (maskMatch < 0.05) shadow = getShadow(P, N);
-  #endif
-  #else
-  float shadow = getShadow(P, N);
+  float shadow = s.shadow >= 0.0 ? s.shadow : getShadow(P, N);
   #endif
   vec3 E = lightColor * NdotL * shadow;
   #ifdef PIPELINE_ANISOTROPY
@@ -378,10 +383,10 @@ void main() {
     // Lit through the sheet only when the key is geometrically behind it; with two-sided shadows the (denoised)
     // shadow above is already the back side's.
     float backNdotL = max(-dot(nl, L), 0.0) * step(0.0, -dot(N, L));
-    float backShadow = shadowTwoSided > 0.5 ? shadow : getShadowFixed(P, -N, 3.0);
+    float backShadow = shadowTwoSided > 0.5 || s.shadow >= 0.0 ? shadow : getShadowFixed(P, -N, 3.0);
     #else
     float backNdotL = clamp(-dot(n, L), 0.0, 1.0);
-    float backShadow = backNdotL > 0.0 ? getShadowFixed(P, -N, 3.0) : 0.0;
+    float backShadow = backNdotL > 0.0 ? (s.shadow >= 0.0 ? s.shadow : getShadowFixed(P, -N, 3.0)) : 0.0;
     #endif
     if (backNdotL > 0.0) directTransmission = lightColor * backNdotL * backShadow * s.transmission * diffuseColor * PIPELINE_INV_PI;
     #ifdef PIPELINE_THIN_SHEET

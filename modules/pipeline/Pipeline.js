@@ -186,6 +186,8 @@ class Pipeline {
 
     // (hdrTexture, { depthTexture, camera, width, height }) => texture, run before bloom; see render().
     this.composite = options.composite ?? null;
+    // Opt-in: like composite, but after depth of field, for light that draws its own blur (out-of-focus specks as discs).
+    this.afterFocus = options.afterFocus ?? null;
 
     // Opt-in depth of field (perspective cameras). Set dof.focus (distance) and dof.aperture (blur of
     // infinity, as a fraction of the height). Live frames are blurred by depth; while nothing changes,
@@ -195,6 +197,9 @@ class Pipeline {
     this.dofRequested = !!dofOptions;
     this.dofEnabled = !!dofOptions && (dofOptions.enabled ?? true);
     this.lensSamples = dofOptions?.lensSamples ?? 256;
+    // Opt-in: while the lens average builds up, show the last live frame held still instead of each new sample's gather
+    // (which shifts with its point on the lens, so the stand-in shakes).
+    this.dofHoldLive = !!dofOptions?.holdLive;
     // Opt-in: while the view holds still, average this many jittered frames, then stop rendering the scene.
     // Without depth of field it borrows the lens average with no aperture, so it only antialiases.
     this.stillSamples = options.stillSamples ?? 0;
@@ -596,9 +601,19 @@ class Pipeline {
       if (t >= 1) this._settleFade = false;
       return (this._settleShown = t < 1 ? dof.blend(this.renderer, this._settleFrom.texture, mean, t * t * (3 - 2 * t)) : mean);
     }
+    if (n === 1) this._holdReady = false;
+    if (n === 1 && this.dofHoldLive && this._lastGather) {
+      this._holdFrom ??= colorTarget(HalfFloatType);
+      if (this._holdFrom.width !== this.width || this._holdFrom.height !== this.height) this._holdFrom.setSize(this.width, this.height);
+      this.copyMaterial.uniforms.tInput.value = this._lastGather;
+      this.copyMaterial.uniforms.weight.value = 1;
+      this._pass(this.copyMaterial, this._holdFrom);
+      this._holdReady = true;
+    }
     const fade = Math.min(1, Math.max(0, (n - 8) / 24));
     if (fade >= 1) return mean;
-    return dof.blend(this.renderer, dof.gather(this.renderer, hdr, this.depthTexture, camera), mean, fade);
+    const from = this._holdReady ? this._holdFrom.texture : dof.gather(this.renderer, hdr, this.depthTexture, camera);
+    return dof.blend(this.renderer, from, mean, this._holdReady ? fade * fade * (3 - 2 * fade) : fade);
   }
 
   _trackInstances(object) {
@@ -903,9 +918,10 @@ class Pipeline {
         if (motionOn) hdr = this._renderMotionBlur(hdr);
         // Opt-in hook for a day's own full-screen pass over the lit HDR image (e.g. ray-traced glass).
         if (this.composite && debug === "none") hdr = this.composite(hdr, { depthTexture: this.depthTexture, camera, width: this.width, height: this.height }) ?? hdr;
-        if (dof) hdr = dof.gather(renderer, hdr, this.depthTexture, camera);
+        if (dof) hdr = this._lastGather = dof.gather(renderer, hdr, this.depthTexture, camera);
       }
 
+      if (this.afterFocus && debug === "none") hdr = this.afterFocus(hdr, { depthTexture: this.depthTexture, camera, width: this.width, height: this.height }) ?? hdr;
       const bloomOn = this.bloom && this.bloomStrength > 0 && (debug === "none" || debug === "clipping");
       const f = this.finalMaterial.uniforms;
       f.tColor.value = hdr;
@@ -1092,6 +1108,7 @@ class Pipeline {
     this.shadowMask?.dispose();
     this.dof?.dispose();
     this._settleFrom?.dispose();
+    this._holdFrom?.dispose();
     this.gi.dispose();
   }
 }
