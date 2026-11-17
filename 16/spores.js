@@ -38,6 +38,10 @@ import { PipelineMaterial } from "modules/pipeline/PipelineMaterial.js";
 import { globalUniforms } from "modules/pipeline/uniforms.js";
 
 const SIZE = 512;
+// Update passes per simulation step (?substeps=2 for the old two, to compare). With one, drag is scaled to match two's
+// motion and tearing (measured: spore speeds and intact bonds within a few percent).
+const SUBSTEPS = Math.max(1, Math.round(Number(new URLSearchParams(location.search).get("substeps")) || 1));
+const ONE_PASS_DRAG = 0.875;
 const MAX_SPORES = SIZE * SIZE;
 // Density grid: G³ cells over a box of half-size BOX, as TILES x TILES slices in an ATLAS² texture.
 const G = 64;
@@ -381,6 +385,8 @@ uniform float pressure;
 uniform float cohesion;
 uniform float bond;
 uniform float drag;
+// Drag's scale for the number of update passes a step (see ONE_PASS_DRAG).
+uniform float dragScale;
 uniform float centering;
 uniform sampler2D tBond;
 uniform float tear;
@@ -687,7 +693,7 @@ void main() {
     vec3 vAvg = sampleAtlas(tMomentum, p).rgb / max(here.x, 0.05);
     v = mix(v, vAvg, (1.0 - exp(-viscosity * dt)) * smoothstep(0.05, 0.3, here.x) * (1.0 - transit));
   }
-  v *= exp(-(age >= 0.6 ? 0.5 : drag) * dt);
+  v *= exp(-(age >= 0.6 ? 0.5 : drag * dragScale) * dt);
   p += v * dt;
   // The swell itself: while a pulse fills, the mass expands from its colony's centre (more on the pulse's side), and
   // shrinks back as it sags; the lowered rest density then holds it. Radius changes ~15% per unit of pulse.
@@ -912,6 +918,7 @@ function createSpores(renderer, random) {
     cohesion: { value: 6 },
     bond: { value: 60 },
     drag: { value: 1.5 },
+    dragScale: { value: 1 },
     centering: { value: 1.5 },
     rayOrigin: { value: new Vector3(0, 0, 100) },
     rayDir: { value: new Vector3(0, 0, -1) },
@@ -1319,7 +1326,7 @@ function createSpores(renderer, random) {
   }
 
   // Advances the simulation by dt (substeps share one density grid). dt = 0 (paused) leaves it as it is.
-  function step(dt, time, flowTime, substeps = 2) {
+  function step(dt, time, flowTime, substeps = SUBSTEPS) {
     const grain = uniforms.sporeSize.value;
     const prevTarget = renderer.getRenderTarget();
     const prevAutoClear = renderer.autoClear;
@@ -1363,6 +1370,7 @@ function createSpores(renderer, random) {
       simUniforms.tMomentum.value = fields[0].textures[1];
       // 3. Forces and motion.
       const h = Math.min(dt, 1 / 30) / substeps;
+      simUniforms.dragScale.value = substeps === 1 ? ONE_PASS_DRAG : 1;
       simUniforms.dt.value = h;
       simUniforms.time.value = time;
       simUniforms.flowTime.value = flowTime;
