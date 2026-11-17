@@ -1177,8 +1177,9 @@ function createSpores(renderer, random) {
         // grain's length), as a bump where the grain is big enough to show it; strongest under the microscope.
         float relief = 0.0;
         float furrow = 0.0;
-        float bump = max(microscope, 0.8 * detail) * ornament * smoothstep(1.5, 6.0, vPix);
-        if (bump > 0.001) {
+        float bump = max(microscope, 0.8 * detail) * ornament * smoothstep(4.0, 9.0, vPix);
+        // Only where a grain is big enough on screen to show it (it's the costliest part of the shading).
+        if (bump > 0.02) {
           float a = 6.2831853 * vSpore.z;
           vec3 local = vec3(n2.x * cos(a) - n2.y * sin(a), n2.x * sin(a) + n2.y * cos(a), nz);
           vec2 cells = sporeCells(local * 3.2 + vSpore.zyx * 17.0);
