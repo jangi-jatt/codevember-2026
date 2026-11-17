@@ -427,7 +427,7 @@ function hideLoading() {
 }
 
 // Fades the placeholder out; render() calls it after the first frame. With a hint, the backdrop fades
-// while the pill resizes to the hint, which stays a few seconds or until the first interaction.
+// while the pill resizes to the hint, which stays long enough to read it or until the first interaction.
 function ready() {
   if (!loading?.isConnected || loading.classList.contains("done")) return;
   const span = loading.querySelector("span");
@@ -467,7 +467,9 @@ function ready() {
     span.style.width = `${to}px`;
     setTimeout(() => loading.classList.add("shown"), 350);
   }, 250);
-  setTimeout(dismiss, 6000);
+  // Long enough to read: 2 s plus 0.3 s a word, 6 to 16 s; any interaction dismisses it sooner.
+  const words = hintText.split(/\s+/).filter((w) => /\w/.test(w)).length;
+  setTimeout(dismiss, 1000 * Math.min(16, Math.max(6, 2 + 0.3 * words)));
 }
 
 // Buttons next to the GUI
