@@ -256,6 +256,7 @@
         [13, "How Labyrinth Rolls"],
         [14, "How Tension Holds"],
         [15, "How Mirage Shimmers"],
+        [16, "How Spore Lives"],
       ]
         .filter(([day]) => days[day - 1].title)
         .map(([day, title]) => ({ small: `Day ${day} · ${days[day - 1].prompt}`, title, href: `./${day}/explainer.html`, thumb: `screenshots/${day}.jpg` }));

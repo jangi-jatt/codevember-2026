@@ -1,0 +1,584 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script src="../modules/theme.js"></script><script src="../modules/page.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>How Spore Lives</title>
+<meta name="description" content="How Codevember 2026 day 16, Spore, keeps a colony of 160,000 grains alive on the GPU: density and packing grids, bonds that tear and heal, a curl-noise current, wildness from a calm blob to a mass of arms, changes that never jump, grains lit through each other, a shaft of light cut by the colony's shadow, a camera that keeps to the lit side, and a soundscape placed in 3D.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;1,7..72,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* One reading column on a warm grey; figures are small benches on a dark stage, lit like the colony. */
+:root {
+  --bg: #ebe7df;
+  --panel: #f3f0e9;
+  --ink: #1b1813;
+  --muted: #5f584c;
+  --line: #d2cbbd;
+  --accent: #b5650a;
+  --accent2: #d99a12;
+  --stage: #15130f;
+  --stage-ink: #8f8676;
+  --crust: #f2b10c;
+  --crust2: #e07a0a;
+  --core: #2a2520;
+  --display: "Bricolage Grotesque", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --body: "Literata", Georgia, "Times New Roman", serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12100d; --panel: #1b1814; --ink: #efe9df; --muted: #a79e8f; --line: #342e26;
+    --accent: #f0a540; --accent2: #ffc35a; --stage: #0b0a08; --stage-ink: #8f8676; --core: #3a332b;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12100d; --panel: #1b1814; --ink: #efe9df; --muted: #a79e8f; --line: #342e26;
+  --accent: #f0a540; --accent2: #ffc35a; --stage: #0b0a08; --stage-ink: #8f8676; --core: #3a332b;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg); color: var(--ink); font: 400 17px/1.62 var(--body); margin: 0;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 0 64px;
+}
+main { max-width: 1060px; margin: 0 auto; display: flex; flex-direction: column; gap: 72px; }
+.col { max-width: 680px; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; line-height: 1.05; }
+h1 { font-weight: 800; font-size: clamp(44px, 9vw, 104px); letter-spacing: -0.035em; }
+h2 { font-weight: 700; font-size: clamp(28px, 4.4vw, 42px); letter-spacing: -0.02em; }
+h3 { font-weight: 700; font-size: 19px; letter-spacing: -0.005em; }
+p { margin: 0; }
+.prose { display: flex; flex-direction: column; gap: 16px; }
+.eyebrow { font: 600 12px/1 var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.eyebrow b { color: var(--accent); font-weight: 600; }
+code, .mono { font-family: var(--mono); font-size: 0.84em; }
+code { background: color-mix(in srgb, var(--ink) 7%, transparent); padding: 0.08em 0.35em; border-radius: 3px; }
+a { color: var(--accent); }
+a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+section { display: flex; flex-direction: column; gap: 24px; }
+
+/* Hero */
+.hero { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 40px; align-items: end; padding-top: 48px; }
+.hero .lede { font-size: 20px; line-height: 1.5; max-width: 34ch; }
+.hero-text { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.hero h1 .glow { color: var(--accent); }
+@supports ((background-clip: text) or (-webkit-background-clip: text)) {
+  .hero h1 .glow {
+    background: linear-gradient(100deg, var(--accent) 10%, var(--accent2) 95%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+}
+.hero figure { margin: 0; position: relative; }
+.hero img { display: block; width: 100%; height: auto; aspect-ratio: 1; object-fit: cover; border-radius: 2px; background: var(--stage); }
+.hero figcaption { font: 400 12px/1.4 var(--mono); color: var(--muted); margin-top: 8px; }
+.meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font: 400 13px/1.3 var(--mono); color: var(--muted); }
+.meta span b { color: var(--ink); font-weight: 600; }
+
+/* Figures */
+.fig { background: var(--panel); border-radius: 4px; padding: 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.fig-head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; align-items: baseline; }
+.fig-cap { font-size: 14.5px; line-height: 1.5; color: var(--muted); max-width: 70ch; }
+.fig canvas { display: block; width: 100%; max-width: 100%; touch-action: pan-y; border-radius: 3px; background: var(--stage); }
+.controls { display: flex; flex-wrap: wrap; gap: 12px 24px; align-items: center; font: 400 13px/1.2 var(--mono); color: var(--muted); }
+.controls label { display: flex; gap: 10px; align-items: center; }
+.controls output { color: var(--ink); min-width: 3ch; font-variant-numeric: tabular-nums; }
+input[type="range"] { accent-color: var(--accent); width: 130px; }
+input[type="checkbox"] { accent-color: var(--accent); }
+button {
+  font: 600 13px/1 var(--mono); color: var(--bg); background: var(--ink); border: 0; border-radius: 3px;
+  padding: 9px 14px; cursor: pointer;
+}
+button.ghost { background: transparent; color: var(--ink); box-shadow: inset 0 0 0 1px var(--line); }
+button:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 18px; font: 400 12.5px/1.2 var(--mono); color: var(--muted); }
+.legend i { display: inline-block; width: 18px; height: 0; border-top: 2px solid currentColor; vertical-align: middle; margin-right: 6px; }
+.legend .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: currentColor; vertical-align: middle; margin-right: 6px; }
+.readout { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 400 13px/1.3 var(--mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.readout b { color: var(--ink); font-weight: 600; }
+
+.items { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.item { background: var(--panel); border-radius: 4px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.item img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; background: var(--stage); }
+.item > div { padding: 16px 18px 18px; display: flex; flex-direction: column; gap: 10px; }
+.item h3 { font-size: 20px; }
+.item p { font-size: 15px; line-height: 1.55; color: var(--muted); }
+.facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+.fact { background: var(--panel); border-radius: 4px; padding: 14px 16px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.fact b { font: 700 15px/1.2 var(--display); }
+.fact span { font-size: 14px; line-height: 1.45; color: var(--muted); }
+.fact code { font-size: 12.5px; }
+.formula { font: 400 14px/1.6 var(--mono); background: var(--panel); border-radius: 4px; padding: 14px 16px; overflow-x: auto; white-space: nowrap; }
+.formula .c { color: var(--muted); }
+.keys { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 6px 24px; font-size: 15px; line-height: 1.45; margin: 0; padding: 0; list-style: none; }
+.keys li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+.keys b { font: 600 13px/1 var(--mono); }
+footer { font: 400 13px/1.6 var(--mono); color: var(--muted); border-top: 1px solid var(--line); padding-top: 20px; }
+
+@media (max-width: 760px) {
+  .hero { grid-template-columns: minmax(0, 1fr); padding-top: 28px; gap: 28px; }
+  .fig { padding: 16px; }
+  main { gap: 56px; }
+}
+</style>
+</head>
+<body>
+<main>
+  <header class="hero">
+    <div class="hero-text">
+      <div class="eyebrow"><a href="../">Codevember 2026</a> · <b>Day 16</b> · Spore</div>
+      <h1>How Spore <span class="glow">lives</span></h1>
+      <p class="lede">A colony of spores hangs in a shaft of light, folding, swelling, budding and shedding grains, a waxy golden crust over dark caviar. Here is how 160,000 particles hold together on the GPU, how a colony turns calm or wild without ever jumping, and how the light, the camera and the sound are made to follow it.</p>
+      <a class="live" href="./">See it live <svg viewBox="0 0 12 12" width="11" height="11" aria-hidden="true"><path d="M3 1.8v8.4c0 .5.5.8.9.5l6.6-4.2a.6.6 0 0 0 0-1L3.9 1.3c-.4-.3-.9 0-.9.5z" fill="currentColor"/></svg></a>
+    </div>
+    <figure>
+      <img src="../screenshots/16.jpg" width="1080" height="1080" alt="A folded colony of tiny golden and black grains with a few curling lobes, floating in a beam of warm light with out-of-focus dust." fetchpriority="high" decoding="async">
+      <figcaption>A colony a little on the wild side, half a minute old.</figcaption>
+    </figure>
+  </header>
+
+  <!-- 1. The idea -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The idea</div>
+      <h2>A living mass, lit like a specimen</h2>
+      <p>Day 16's prompt was Spore. The references were macro photographs that don't exist: a clump of pollen-like grains floating in the dark, a waxy yellow crust in patches over dark, glossy beads, a shaft of light cutting through dust behind it, and the clump's own shadow running down the beam. The piece builds that clump out of particles and keeps it alive: it folds slowly, swells in uneven pulses, lets ripe patches burst, buds off lobes that wander and come back, and splits into two or three colonies that drift apart and fuse again.</p>
+      <p>Everything renders through the <a href="../modules/pipeline/explainer.html">shared photographic pipeline</a>: soft shadows, ambient occlusion and bounce light, depth of field and AgX tonemapping. What is specific to the day is the simulation that drives the grains, the way it changes from one colony to the next, and the light, camera and sound around it.</p>
+    </div>
+  </section>
+
+  <!-- 2. The simulation -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The simulation · <b>spores.js step, updateFragment</b></div>
+      <h2>A goo of grains, on two grids</h2>
+      <p>Every spore is a particle whose position, velocity, bonds and state live in float textures, 512 by 512 (up to 262,144 spores; 160,000 on desktops, 90,000 on phones). A step never asks a spore about its neighbours one by one. Instead, all the spores are splatted into two grids, the grids are read back where each spore is, and the forces come from the grids.</p>
+      <p>The coarse grid is 64 cells a side over the box the colony lives in, stored as eight by eight slices of a 512 by 512 atlas. Every spore adds itself to the cells round it, and the grid is blurred along x, y and z in turn: once narrowly, for pressure, and once widely, for cohesion. Pressure pushes spores down the gradient of the narrow density wherever it rises above the density the colony settles at, so the mass keeps its volume. Cohesion pulls them up the gradient of the wide density, only near the surface, so the mass holds together like a goo and rounds itself off.</p>
+      <p>The fine grid is 128 cells a side, about a grain across, and measures packing. Each spore spreads its grain volume over its eight neighbouring cells; it is drawn as two points of two by two pixels, one per depth slice, and each fragment takes its own corner's share. Spores packed tighter than grains allow are pushed apart by its gradient: these are the collisions.</p>
+      <p>Each spore also has four bonds to mates in its clump, springs at the length they started at. Stretched past the Tear distance, a bond snaps; when the two come close again, it grows back. On top of all this a current stirs the mass: the curl of a slowly drifting simplex noise field, which has no divergence, so it folds the colony into lobes and overhangs without bunching it up or tearing it open. The noise's analytic gradient gives the curl from three lookups instead of eighteen finite differences.</p>
+    </div>
+    <div class="formula">v ← v · e<sup>−drag·dt</sup> + dt · (−pressure·∇ρ<sub>narrow</sub> + cohesion·skin·∇ρ<sub>wide</sub> − collisions·∇packing + bonds + current)<br><span class="c">ρ: the blurred densities read at the spore; skin: 1 at the colony's surface, 0 deep inside; current: turbulence · curl(noise(p · scale + offset + time))</span></div>
+    <div class="fig">
+      <div class="fig-head"><h3>Grains on a grid, in two dimensions</h3>
+        <div class="controls">
+          <label>turbulence <input id="sT" type="range" min="0" max="3" step="0.05" value="1.2"><output id="sTo"></output></label>
+          <label>cohesion <input id="sC" type="range" min="0" max="3" step="0.05" value="1"><output id="sCo"></output></label>
+          <button id="sReset" class="ghost">Reset</button>
+        </div>
+      </div>
+      <canvas id="simCanvas" aria-label="A few hundred golden and dark dots in a rounded clump, stirred by a slow current: with more turbulence the clump stretches into lobes, with more cohesion it pulls back into a ball."></canvas>
+      <div class="readout"><span>grains <b>600</b></span><span>grid <b>32 × 32</b></span></div>
+      <p class="fig-cap">The same recipe on a flat bench: every grain is splatted into a coarse grid, the grid is blurred, and each grain moves down the pressure gradient, up the cohesion gradient near the surface, and along a slowly turning curl current. Turn the current up and the clump throws out lobes; turn cohesion down and they come loose.</p>
+    </div>
+    <div class="col prose">
+      <p>The step runs on a fixed clock of 60 steps a second, so a seed, the settings and a time always give the same colony. It updates once a step, with drag scaled so that the colony moves and tears as it did with two half-steps, compared on the spores' speeds, intact bonds and the colony's size after half a minute of simulation.</p>
+    </div>
+  </section>
+
+  <!-- 3. Speed and pace -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Two clocks · <b>main.js simStep, spores.js interpolate</b></div>
+      <h2>Slow life, quick reflexes</h2>
+      <p>Speed runs the physics: how fast spores move, settle and react to anything done to them. Pace runs the colony's own life: how fast its current drifts, how often it pulses, bursts and buds, and how the colonies circle. At the default Pace of 0.5 the colony lives at half speed and still answers a poke or a drag at full speed. The current's push scales with the square root of Pace, so a slow colony still folds as deeply.</p>
+      <p>At a low Speed the steps come only every few frames, which used to show as a stutter. The spores are now drawn between the last two steps, as far between as the next step has come, so the mass moves every frame at any speed, and the motion vectors the pipeline uses for its blur and its AO history follow the drawn positions.</p>
+    </div>
+  </section>
+
+  <!-- 4. Life -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Life · <b>main.js updatePulses, updateSporulation, updateBud, updateColonies</b></div>
+      <h2>Pulses, bursts, buds and colonies</h2>
+      <p>Every one to five seconds, unevenly, with now and then a quick double beat, the colony swells: the density it settles at drops on one side, it fills out in a fraction of a second, and sags back over a second or two. Every few seconds a patch of ripe crust facing one way swells and pops, and its spores fly off, shrink to nothing and grow back beside their clump-mates. Now and then a lobe swells out, a neck pinches it off, and the bud is held round its own centre as it drifts round the colony and comes home.</p>
+      <p>With two or three colonies, each spore belongs to one (by its clump, so clumps never straddle two) and heads for its colony's centre. The centres circle on a ring that turns to face the camera, and its radius breathes: well apart for a while, then together until they fuse at the surface, then apart again. When the number of colonies changes, they first draw together into one place, the count changes there, and they spread out again, so no spore is ever yanked across the screen.</p>
+    </div>
+    <div class="items">
+      <article class="item"><img src="explainer/colonies.jpg" alt="Three colonies apart in the beam, one yellow and two orange, each streaked with dark grains." loading="lazy"><div>
+        <h3>Three colonies</h3>
+        <p>Each colony keeps a colour of its own (the palette's two crust colours and a third between them), streaked with the others' where they have mixed.</p>
+      </div></article>
+      <article class="item"><img src="explainer/backlit.jpg" alt="A colony seen from behind, against the light: dark, with a glowing amber rim and lobes, the beam bright behind it." loading="lazy"><div>
+        <h3>Against the light</h3>
+        <p>From behind, the light comes through the thin edges and lobes, and the haze round the colony glows with streaks toward the light.</p>
+      </div></article>
+    </div>
+  </section>
+
+  <!-- 5. Wildness -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Wildness · <b>main.js applyWildness, randomWildness, breaksRules</b></div>
+      <h2>From a calm blob to a mass of arms</h2>
+      <p>One slider, Wildness, sets the colony's physics in one go. At 0 it is a slow, rounded blob that barely pulses: a weak current, strong cohesion and pressure, few bursts and buds. At 0.5 it is the usual colony. At 1 the current is strong and coarse against weak cohesion and pressure, and tough bonds hold the mass together as it stretches into arms, pulsing, budding and bursting more. Between the three anchors every setting is interpolated, and a randomized colony nudges each by up to eight percent.</p>
+      <p>Randomizing alternates sides: a calmer colony, then a wilder one. On each side the distance from the middle is at least 0.1 and leans small: half the colonies land within 0.2 of the middle, and the extremes are rare. It also never repeats the palette, and after two or three colonies always goes back to one. Each of these choices depends on the seed alone: a seed that would break a rule is simply passed over for another. So a seed's url always gives back its own colony.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>Where randomized colonies land</h3>
+        <div class="controls">
+          <button id="wDraw">Randomize 12</button>
+          <label>wildness <input id="wW" type="range" min="0" max="1" step="0.01" value="0.7"><output id="wWo"></output></label>
+        </div>
+      </div>
+      <canvas id="wildCanvas" aria-label="Above, a histogram of wildness values of many randomized colonies, two humps either side of the middle, thin at both ends. Below, twelve colonies in a row alternating calm and wild, and curves of turbulence and cohesion against wildness with a marker at the slider."></canvas>
+      <div class="readout"><span>turbulence <b id="wTu"></b></span><span>cohesion <b id="wCo"></b></span><span>pressure <b id="wPr"></b></span><span>bonds <b id="wBo"></b></span></div>
+      <p class="fig-cap">Top: 20,000 draws, either side of the middle and leaning toward it. Middle: a run of randomized colonies, alternating calm and wild. Bottom: the physics each wildness stands for, interpolated between the calm, usual and wild anchors.</p>
+    </div>
+    <div class="items">
+      <article class="item"><img src="explainer/calm.jpg" alt="A small, rounded colony at wildness 0.12, finely marbled gold and black." loading="lazy"><div>
+        <h3>Wildness 0.12</h3>
+        <p>A calm colony: compact and rounded, its crust worked into fine marbling by a weak current.</p>
+      </div></article>
+      <article class="item"><img src="explainer/wild.jpg" alt="A large colony at wildness 0.9, stretched into two long arms, streaked gold and black." loading="lazy"><div>
+        <h3>Wildness 0.9</h3>
+        <p>A wild one: the current pulls it into arms and overhangs, and tough bonds keep them attached as they stretch.</p>
+      </div></article>
+    </div>
+  </section>
+
+  <!-- 6. Never jumps -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Changes · <b>main.js staggerChange, ease, easeOffset; spores.js vertex</b></div>
+      <h2>Nothing jumps</h2>
+      <p>When a new colony arrives, its colours, crust and grain size don't switch all at once. Each spore changes on its own schedule: a start delay shared loosely by its clump (up to 0.8 s), an offset of its own (up to 0.9 s), and a pace of its own (0.5 to 1.4 s). The change spreads through the mass in patches and speckles, the old and new colours mixed on the surface for a moment. A change in the number of colonies has its own clock, so each spore takes its new colony's colour on the same kind of schedule.</p>
+      <p>The physics follows critically damped springs instead of easing: they start gently, move smoothly and settle without overshoot. The bigger the jump in wildness, the slower the springs, from about four seconds for a small change to about fifteen for the most extreme, with the per-spore stagger stretched to match. The current's place in noise space, which reshapes the mass, has a spring of its own. Auto change waits for a change to settle before counting toward the next one.</p>
+    </div>
+    <div class="formula">delay = 0.8 · hash(clump) + 0.9 · hash(spore) &nbsp; change = smoothstep(delay, delay + 0.5 + 0.9 · hash′(spore), age)<br><span class="c">springs: slower by 1 + 4 · max(0, |Δwildness| − 0.25); auto change counts only once every setting is within 12% of where it is heading</span></div>
+    <div class="fig">
+      <div class="fig-head"><h3>A palette change, spore by spore</h3>
+        <div class="controls">
+          <button id="gGo">Change</button>
+          <label><input id="gStag" type="checkbox" checked> staggered</label>
+        </div>
+      </div>
+      <canvas id="staggerCanvas" aria-label="A field of round grains in clumps, pollen yellow over dark. On Change, the yellow grains turn coral in patches, clump by clump with stragglers, over about two seconds; with stagger off they all turn at once."></canvas>
+      <p class="fig-cap">Each clump starts at its own moment and each grain finishes at its own pace, so the new palette arrives in patches. Turn the stagger off to see the switch it replaces: everything at once.</p>
+    </div>
+  </section>
+
+  <!-- 7. Grains -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Shading · <b>spores.js material, lightFragment, sporeThrough</b></div>
+      <h2>Grains lit through each other</h2>
+      <p>A sphere a few pixels across is all sub-pixel triangles, which the rasterizer handles badly, so every spore is a single quad facing the camera, shaded as a sphere: its normal comes from where the pixel sits in the quad, slightly squashed into an oval along the spore's own axis. Depth is drawn before shading, so each pixel is shaded once however many grains lie behind it.</p>
+      <p>How much light reaches a grain is worked out once per grain per frame, in a pass of its own, not per pixel. The key light is looked up at the grain's lit side, with hardware-filtered taps, so it doesn't flicker as the camera moves. Light also scatters through the mass: from the shadow map, the thickness between a grain and the first grain the light meets gives how much gets through, averaged over a small disc so it spreads sideways. Thin lobes and edges glow when the light is behind them, deep and saturated; the waxy crust lets most through, the dark grains little. Both are eased over a few frames so grains near a shadow's edge don't flicker as they jostle.</p>
+      <p>Up close, the crust grains show a net and a furrow along their length and the dark grains small spines, as a bump. It is the costliest part of the shading, so it only runs on grains big enough on screen to show it.</p>
+    </div>
+    <div class="items">
+      <article class="item"><img src="explainer/grains.jpg" alt="A close-up of the colony's surface: individual round grains, golden ones over dark ones, lit from the upper left." loading="lazy"><div>
+        <h3>Close up</h3>
+        <p>Impostor spheres, each its own size, lit by its own lookup of the key and of the light through the mass.</p>
+      </div></article>
+    </div>
+  </section>
+
+  <!-- 8. Light and air -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Light and air · <b>atmosphere.js</b></div>
+      <h2>A shaft of light the colony cuts</h2>
+      <p>The air is ray-marched at half resolution after the colony is lit: along each view ray, up to whatever the pixel shows, 48 steps gather key light scattered toward the eye from a soft cylinder of light along the key (the shaft) and a thin haze round the colony, each step asking the key's shadow map whether it is lit. So the colony's real shape cuts shadow volumes into the beam, and seen from below, looking toward the light, its gaps let through god rays. A depth-aware upsample adds the result back at full resolution, and while the light is in or near view, streaks are smeared toward it on screen.</p>
+    </div>
+  </section>
+
+  <!-- Depth of field -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Depth of field · <b>the pipeline's depthOfField (holdLive), afterFocus</b></div>
+      <h2>A lens that settles</h2>
+      <p>The colony is shot like a macro photograph: sharp a little in front of its middle, softening toward its far side and into the air, with the Focus slider (or Shift + scroll) moving the plane through it. While anything moves, the blur is gathered from the depth buffer, a fast approximation. Once the view holds still, the pipeline renders the frame again from many points across the lens and averages them, which gets the blur and what hides what exactly; with grains this small, enough points that wide blur melts into bokeh instead of showing the copies. While that average builds up, the last live frame is held and faded into it, so settling doesn't shake.</p>
+      <p>The dust specks are the exception. They are light that draws its own blur: each one is a disc sized by the same lens, drawn after the depth of field so it isn't blurred a second time by whatever lies behind it. And because the idle camera's focus pull is a spring, it settles exactly on its target, or the still would never begin.</p>
+    </div>
+  </section>
+
+  <!-- 9. The camera -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">The idle camera · <b>main.js updateIdleOrbit, updateFocus, focusPuller</b></div>
+      <h2>An operator who keeps to the light</h2>
+      <p>Left alone for five seconds, the camera takes over. It circles the light's axis while its angle from the light swings between 35 and 100 degrees: mostly on the lit side, in three-quarter light, dipping just past the terminator into shadow for a few seconds each swing and never swinging round to the back. It follows its path with a short lag and a capped turn rate, frames the bulk of the colony (all of them, wider for wilder ones) and slowly zooms between a close fill and a looser view, always leaving a margin.</p>
+      <p>Focus has an operator too. Every six to twelve seconds it racks to another spot between the colony's front and its middle, or scans slowly between two. It normally trails lazily; when it falls too far out of focus, it refocuses fast with a little overshoot, then settles. Dragging orbits gimbal-free, turning the camera's up with it, so it goes over and under the colony; any input hands the camera back.</p>
+    </div>
+    <div class="fig">
+      <div class="fig-head"><h3>The orbit, seen from the side</h3>
+        <div class="controls">
+          <label><input id="oRun" type="checkbox" checked> moving</label>
+        </div>
+      </div>
+      <canvas id="orbitCanvas" aria-label="A colony in the middle, the key light arrow coming from the upper left. A band around it marks the camera's range, 35 to 100 degrees from the light, most of it on the lit side. A dot travels within the band, a trail behind it, briefly crossing into the shaded side."></canvas>
+      <div class="readout"><span>angle from the light <b id="oAng"></b></span><span>side <b id="oSide"></b></span></div>
+      <p class="fig-cap">The band is where the camera may be: 35° to 100° from the light. The dot circles the light's axis (here unrolled onto the page) while its angle swings over 40 seconds; past 90° it is on the shaded side, briefly.</p>
+    </div>
+  </section>
+
+  <!-- 10. Sound -->
+  <section>
+    <div class="col prose">
+      <div class="eyebrow">Sound · <b>sound.js</b></div>
+      <h2>Low, rough and close</h2>
+      <p>Under everything is a bed: a recording time-stretched ten times at its own pitch, by layering half-second grains four deep under smooth windows, read from a point that creeps through the track at a tenth of real time, each grain jittered a little so they don't phase.</p>
+      <p>The colony's sounds are synthesized from filtered noise and sines and placed in 3D where they happen, with the listener at the camera, so they come from their side of the colony and move as the camera orbits. The swarm seethes all the time, as lively as the colony; swells breathe a low rush; bursts crackle; buds gulp; hovering over a colony rustles; a tap lands with a low thump; grabbing a colony comes unstuck and stretching it creaks; gathering builds and a fling whooshes; colonies tear apart and fuse with a wet merge; a new colony groans in through an unpitched rush over tumbling ticks. They all go through a soft saturation and a low-pass, so they come out low, rough and muffled, into a shared five-second room where faint knocks come from behind the listener. A hidden tab silences it all.</p>
+    </div>
+  </section>
+
+
+  <footer class="col">
+    <div class="meta">
+      <span><b>three.js</b> r187</span><span>WebGL2</span><span>GPU particles on density grids</span><span>HRTF soundscape</span><span>started in <b>Antigravity</b> with Opus 5.5, finished in <b>Claude Code</b> with Opus 5.5</span>
+    </div>
+    Day 16 of <a href="../">Codevember 2026</a> by Jaume Sanchez Elias. See it live at <a href="https://spite.github.io/codevember-2026/16/">spite.github.io/codevember-2026/16</a>; the source is in <a href="https://github.com/spite/codevember-2026/tree/main/16">16/ of the codevember-2026 repository</a>. Simplex noise with analytic gradient from webgl-noise (Ian McEwan, Stefan Gustavson, MIT).
+  </footer>
+</main>
+
+<script>
+(() => {
+  const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const $ = (id) => document.getElementById(id);
+  const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
+  const font = (px, w = 400) => `${w} ${px}px ${css("--mono") || "monospace"}`;
+  const smoothstep = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
+  const hash = (n) => { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); };
+
+  function setup(canvas, aspect, draw) {
+    const ctx = canvas.getContext("2d");
+    let lastW = -1, W = 0, H = 0;
+    const fit = (force) => {
+      if (force !== true && canvas.clientWidth === lastW) return;
+      lastW = canvas.clientWidth;
+      W = canvas.clientWidth || 600; H = Math.round(W * aspect);
+      const dpr = Math.min(2, devicePixelRatio || 1);
+      canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); canvas.style.height = H + "px";
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      draw(ctx, W, H);
+    };
+    new ResizeObserver(() => requestAnimationFrame(fit)).observe(canvas);
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => fit(true));
+    new MutationObserver(() => fit(true)).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    return { redraw: () => fit(true), paint: () => draw(ctx, W, H), size: () => [W, H], ctx };
+  }
+  function animate(canvas, step) {
+    let on = false, last = 0;
+    new IntersectionObserver(([e]) => { on = e.isIntersecting; if (on) { last = performance.now(); requestAnimationFrame(loop); } }).observe(canvas);
+    function loop(now) {
+      if (!on) return;
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      step(dt);
+      requestAnimationFrame(loop);
+    }
+  }
+  const bind = (id, out, fmt, fn) => { const el = $(id); const o = $(out); const show = () => { if (o) o.textContent = fmt(+el.value); }; el.addEventListener("input", () => { show(); fn(); }); show(); return el; };
+
+  // 1. Grains on a grid: splat into a coarse grid, blur, pressure and cohesion gradients, a curl current, drag.
+  {
+    const N = 600, GN = 32;
+    const T = bind("sT", "sTo", (v) => v.toFixed(2), () => {});
+    const C = bind("sC", "sCo", (v) => v.toFixed(2), () => {});
+    let px, py, vx, vy, kind, time = 0;
+    const reset = () => {
+      px = new Float32Array(N); py = new Float32Array(N); vx = new Float32Array(N); vy = new Float32Array(N); kind = new Uint8Array(N);
+      for (let i = 0; i < N; i++) {
+        const a = hash(i) * Math.PI * 2, r = 0.45 * Math.sqrt(hash(i + 0.5));
+        px[i] = Math.cos(a) * r; py[i] = Math.sin(a) * r;
+        kind[i] = Math.sin(a * 3 + r * 9) > 0.1 ? 1 : 0;
+      }
+    };
+    reset();
+    $("sReset").addEventListener("click", reset);
+    const dens = new Float32Array(GN * GN), wide = new Float32Array(GN * GN), tmp = new Float32Array(GN * GN);
+    const blur = (src, dst, r) => {
+      for (let y = 0; y < GN; y++) for (let x = 0; x < GN; x++) { let s = 0, w = 0; for (let k = -r; k <= r; k++) { const xx = x + k; if (xx < 0 || xx >= GN) continue; const g = Math.exp(-(k * k) / (r * r)); s += src[y * GN + xx] * g; w += g; } tmp[y * GN + x] = s / w; }
+      for (let y = 0; y < GN; y++) for (let x = 0; x < GN; x++) { let s = 0, w = 0; for (let k = -r; k <= r; k++) { const yy = y + k; if (yy < 0 || yy >= GN) continue; const g = Math.exp(-(k * k) / (r * r)); s += tmp[yy * GN + x] * g; w += g; } dst[y * GN + x] = s / w; }
+    };
+    const toG = (p) => (p + 1) * 0.5 * (GN - 1);
+    const sample = (g, x, y) => { const gx = clamp(toG(x), 0, GN - 1.001), gy = clamp(toG(y), 0, GN - 1.001); const ix = Math.floor(gx), iy = Math.floor(gy), fx = gx - ix, fy = gy - iy; const a = g[iy * GN + ix], b = g[iy * GN + ix + 1], c = g[(iy + 1) * GN + ix], d = g[(iy + 1) * GN + ix + 1]; return (a * (1 - fx) + b * fx) * (1 - fy) + (c * (1 - fx) + d * fx) * fy; };
+    // A stream function of a few drifting waves; its curl is the current (divergence-free).
+    const stream = (x, y, t) => Math.sin(x * 3.1 + t * 0.4) * Math.cos(y * 2.7 - t * 0.3) + 0.6 * Math.sin((x + y) * 4.3 + t * 0.55) + 0.4 * Math.cos((x - y) * 5.1 - t * 0.35);
+    const fig = setup($("simCanvas"), 0.56, (ctx, W, H) => {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const s = H * 0.5 * 0.95;
+      const crust = css("--crust"), core = css("--core");
+      for (const k of [0, 1]) {
+        ctx.fillStyle = k ? crust : core;
+        for (let i = 0; i < N; i++) if (kind[i] === k) { ctx.beginPath(); ctx.arc(W / 2 + px[i] * s, H / 2 + py[i] * s, Math.max(1.6, s * 0.012), 0, Math.PI * 2); ctx.fill(); }
+      }
+    });
+    const h = 2 / (GN - 1);
+    animate($("simCanvas"), (dt) => {
+      time += dt;
+      const turb = +T.value, coh = +C.value;
+      for (let sub = 0; sub < 2; sub++) {
+        const st = dt / 2;
+        dens.fill(0);
+        for (let i = 0; i < N; i++) { const gx = Math.round(toG(px[i])), gy = Math.round(toG(py[i])); if (gx >= 0 && gx < GN && gy >= 0 && gy < GN) dens[gy * GN + gx] += 1; }
+        blur(dens, wide, 4);
+        blur(dens, dens, 1);
+        for (let i = 0; i < N; i++) {
+          const x = px[i], y = py[i];
+          const pdx = (sample(dens, x + h, y) - sample(dens, x - h, y)) / (2 * h), pdy = (sample(dens, x, y + h) - sample(dens, x, y - h)) / (2 * h);
+          const wdx = (sample(wide, x + h, y) - sample(wide, x - h, y)) / (2 * h), wdy = (sample(wide, x, y + h) - sample(wide, x, y - h)) / (2 * h);
+          const here = sample(dens, x, y), w = sample(wide, x, y);
+          const skin = 1 - smoothstep(1.6, 3.6, w);
+          const e = 0.01;
+          const cx = (stream(x, y + e, time) - stream(x, y - e, time)) / (2 * e), cy = -(stream(x + e, y, time) - stream(x - e, y, time)) / (2 * e);
+          // Pressure above the resting density (4 grains a cell), cohesion at the surface, the current, a faint pull home.
+          const press = here > 4 ? 0.01 : 0.0015;
+          const fx = -press * pdx + coh * skin * wdx * 0.006 + turb * cx * 0.08 - x * 0.08;
+          const fy = -press * pdy + coh * skin * wdy * 0.006 + turb * cy * 0.08 - y * 0.08;
+          vx[i] = vx[i] * Math.exp(-3 * st) + fx * st;
+          vy[i] = vy[i] * Math.exp(-3 * st) + fy * st;
+          px[i] = clamp(px[i] + vx[i] * st, -0.98, 0.98);
+          py[i] = clamp(py[i] + vy[i] * st, -0.98, 0.98);
+        }
+      }
+      fig.paint();
+    });
+  }
+
+  // 2. Wildness: the draw (either side of the middle, leaning toward it), the alternating run, and the anchors.
+  {
+    const WILD = {
+      calm: { turbulence: 0.6, cohesion: 1.4, pressure: 1.2, bonds: 1 },
+      usual: { turbulence: 1.3, cohesion: 0.9, pressure: 0.9, bonds: 1.2 },
+      wild: { turbulence: 2.05, cohesion: 0.6, pressure: 0.68, bonds: 1.55 },
+    };
+    const at = (w, k) => (w < 0.5 ? WILD.calm[k] + (WILD.usual[k] - WILD.calm[k]) * w * 2 : WILD.usual[k] + (WILD.wild[k] - WILD.usual[k]) * (w * 2 - 1));
+    let seed = 1;
+    const rnd = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
+    const draw = () => { const wild = rnd() < 0.5; const d = 0.1 + 0.4 * rnd() ** 2; return wild ? 0.5 + d : 0.5 - d; };
+    const hist = new Float32Array(50);
+    for (let i = 0; i < 20000; i++) hist[Math.min(49, Math.floor(draw() * 50))]++;
+    let run = [];
+    const makeRun = () => {
+      run = [];
+      let lastWild = null;
+      while (run.length < 12) { const w = draw(); if (lastWild !== null && w >= 0.5 === lastWild) continue; run.push(w); lastWild = w >= 0.5; }
+    };
+    makeRun();
+    const Wl = bind("wW", "wWo", (v) => v.toFixed(2), () => fig.redraw());
+    $("wDraw").addEventListener("click", () => { makeRun(); fig.redraw(); });
+    const fig = setup($("wildCanvas"), 0.62, (ctx, W, H) => {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const ink = css("--stage-ink"), crust = css("--crust"), crust2 = css("--crust2");
+      const L = 44, R = W - 16, x = (w) => L + (R - L) * w;
+      ctx.font = font(11); ctx.fillStyle = ink;
+      // Histogram
+      const top = 16, hh = H * 0.28, max = Math.max(...hist);
+      for (let i = 0; i < 50; i++) { const b = (hist[i] / max) * hh; ctx.fillStyle = i < 25 ? crust2 : crust; ctx.fillRect(x(i / 50) + 1, top + hh - b, (R - L) / 50 - 2, b); }
+      ctx.fillStyle = ink; ctx.fillText("calm", L, top + hh + 14); ctx.fillText("wild", R - 28, top + hh + 14); ctx.fillText("0.5", x(0.5) - 9, top + hh + 14);
+      // Run
+      const ry = top + hh + 44;
+      ctx.fillStyle = ink; ctx.fillText("run", 8, ry + 4);
+      run.forEach((w, i) => {
+        const cx = L + ((R - L) * (i + 0.5)) / run.length;
+        const cy = ry + (0.5 - w) * 34;
+        if (i) { const pw = run[i - 1]; ctx.strokeStyle = ink; ctx.globalAlpha = 0.4; ctx.beginPath(); ctx.moveTo(L + ((R - L) * (i - 0.5)) / run.length, ry + (0.5 - pw) * 34); ctx.lineTo(cx, cy); ctx.stroke(); ctx.globalAlpha = 1; }
+        ctx.fillStyle = w >= 0.5 ? crust : crust2; ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
+      });
+      // Anchors
+      const ay = ry + 50, ah = H - ay - 18;
+      const keys = [["turbulence", crust, 2.2], ["cohesion", "#e8e2d4", 1.6]];
+      for (const [k, col, mx] of keys) {
+        ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.beginPath();
+        for (let i = 0; i <= 100; i++) { const w = i / 100, yy = ay + ah - (at(w, k) / mx) * ah; i ? ctx.lineTo(x(w), yy) : ctx.moveTo(x(w), yy); }
+        ctx.stroke();
+        ctx.fillStyle = col; ctx.fillText(k, x(1) - 76, ay + ah - (at(1, k) / mx) * ah - 6);
+      }
+      ctx.lineWidth = 1;
+      const w = +Wl.value;
+      ctx.strokeStyle = ink; ctx.setLineDash([3, 4]); ctx.beginPath(); ctx.moveTo(x(w), ay); ctx.lineTo(x(w), ay + ah); ctx.stroke(); ctx.setLineDash([]);
+      for (const [k, col, mx] of keys) { ctx.fillStyle = col; ctx.beginPath(); ctx.arc(x(w), ay + ah - (at(w, k) / mx) * ah, 4, 0, Math.PI * 2); ctx.fill(); }
+      $("wTu").textContent = at(w, "turbulence").toFixed(2); $("wCo").textContent = at(w, "cohesion").toFixed(2);
+      $("wPr").textContent = at(w, "pressure").toFixed(2); $("wBo").textContent = at(w, "bonds").toFixed(2);
+    });
+  }
+
+  // 3. The staggered change: clumps of grains, each clump a start delay, each grain an offset and a pace.
+  {
+    const cols = 34, rows = 16;
+    const grains = [];
+    for (let y = 0; y < rows; y++) for (let x = 0; x < cols; x++) {
+      const i = y * cols + x, clump = Math.floor(x / 4) * 7 + Math.floor(y / 3);
+      const crust = Math.sin(x * 0.45 + Math.cos(y * 0.6) * 2) > -0.1;
+      grains.push({ x, y, crust, delay: 0.8 * hash(clump + 0.31) + 0.9 * hash(i + 0.77), span: 0.5 + 0.9 * hash(i + 0.13), size: 0.7 + 0.6 * hash(i + 0.5) });
+    }
+    let age = 99, cur = 0, next = 0;
+    const PAL = [["#ffc414", "#ee8204"], ["#ff8a72", "#e04062"]];
+    const mix = (a, b, t) => { const p = (c) => [1, 3, 5].map((k) => parseInt(c.slice(k, k + 2), 16)); const A = p(a), B = p(b); return `rgb(${A.map((v, k) => Math.round(v + (B[k] - v) * t)).join(",")})`; };
+    const fig = setup($("staggerCanvas"), 0.47, (ctx, W, H) => {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const cell = Math.min(W / (cols + 1), H / (rows + 1)), ox = (W - cell * cols) / 2, oy = (H - cell * rows) / 2;
+      const stag = $("gStag").checked;
+      for (const g of grains) {
+        const t = age > 50 ? 0 : stag ? smoothstep(g.delay, g.delay + g.span, age) : age > 0.9 ? 1 : 0;
+        const a = PAL[cur], b = PAL[next];
+        ctx.fillStyle = g.crust ? mix(a[g.y % 2], b[g.y % 2], t) : css("--core");
+        ctx.beginPath(); ctx.arc(ox + (g.x + 0.5) * cell, oy + (g.y + 0.5) * cell, cell * 0.42 * g.size, 0, Math.PI * 2); ctx.fill();
+      }
+    });
+    $("gGo").addEventListener("click", () => { if (age < 3) return; next = 1 - cur; age = 0; });
+    $("gStag").addEventListener("change", () => fig.redraw());
+    animate($("staggerCanvas"), (dt) => {
+      if (age >= 3) return;
+      age += dt;
+      if (age >= 3) (cur = next), (age = 99);
+      fig.paint();
+    });
+  }
+
+  // 4. The orbit: the angle from the light swings between 35 and 100 degrees as the camera circles the light's axis.
+  {
+    let t = 0;
+    const trail = [];
+    const MID = 67.5, SWING = 32.5;
+    const fig = setup($("orbitCanvas"), 0.55, (ctx, W, H) => {
+      ctx.fillStyle = css("--stage"); ctx.fillRect(0, 0, W, H);
+      const ink = css("--stage-ink"), crust = css("--crust");
+      const cx = W * 0.5, cy = H * 0.55, r = Math.min(W, H) * 0.36;
+      const light = -Math.PI * 0.75;
+      // The colony, lit from the light's side.
+      const g = ctx.createRadialGradient(cx + Math.cos(light) * r * 0.08, cy + Math.sin(light) * r * 0.08, 2, cx, cy, r * 0.2);
+      g.addColorStop(0, crust); g.addColorStop(1, css("--core"));
+      ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, r * 0.18, 0, Math.PI * 2); ctx.fill();
+      // The light and its shadow side.
+      ctx.fillStyle = "rgba(255,255,255,0.04)"; ctx.beginPath(); ctx.moveTo(cx, cy); ctx.arc(cx, cy, r * 1.25, light + Math.PI / 2, light + Math.PI * 1.5); ctx.fill();
+      ctx.strokeStyle = crust; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cx + Math.cos(light) * r * 1.2, cy + Math.sin(light) * r * 1.2); ctx.lineTo(cx + Math.cos(light) * r * 0.3, cy + Math.sin(light) * r * 0.3); ctx.stroke();
+      ctx.fillStyle = crust; ctx.font = font(11); ctx.fillText("light", cx + Math.cos(light) * r * 1.2 - 10, cy + Math.sin(light) * r * 1.2 - 8);
+      // The band where the camera may be, both sides of the axis.
+      ctx.fillStyle = "rgba(240,165,64,0.10)";
+      for (const s of [1, -1]) { ctx.beginPath(); ctx.arc(cx, cy, r * 1.02, light + s * (35 * Math.PI) / 180, light + s * (100 * Math.PI) / 180, s < 0); ctx.arc(cx, cy, r * 0.86, light + s * (100 * Math.PI) / 180, light + s * (35 * Math.PI) / 180, s > 0); ctx.closePath(); ctx.fill(); }
+      ctx.strokeStyle = ink; ctx.setLineDash([3, 4]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(cx + Math.cos(light + Math.PI / 2) * r * 1.2, cy + Math.sin(light + Math.PI / 2) * r * 1.2); ctx.lineTo(cx - Math.cos(light + Math.PI / 2) * r * 1.2, cy - Math.sin(light + Math.PI / 2) * r * 1.2); ctx.stroke(); ctx.setLineDash([]);
+      ctx.fillStyle = ink; ctx.fillText("terminator (90°)", cx - Math.cos(light + Math.PI / 2) * r * 1.2 - 40, cy - Math.sin(light + Math.PI / 2) * r * 1.2 + 16);
+      // The camera: around the axis (phi, shown as the side it is on), its angle from the light swinging.
+      for (let i = 0; i < trail.length; i++) { const p = trail[i]; ctx.fillStyle = `rgba(239,233,223,${(i / trail.length) * 0.5})`; ctx.beginPath(); ctx.arc(p[0], p[1], 2, 0, Math.PI * 2); ctx.fill(); }
+      const theta = MID + SWING * Math.sin((t * 2 * Math.PI) / 40), side = Math.cos(t * 0.13) >= 0 ? 1 : -1;
+      const a = light + (side * theta * Math.PI) / 180, d = r * (0.94 + 0.04 * Math.sin(t * 0.11));
+      const x = cx + Math.cos(a) * d, y = cy + Math.sin(a) * d;
+      ctx.fillStyle = "#efe9df"; ctx.beginPath(); ctx.arc(x, y, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "rgba(239,233,223,0.5)"; ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(cx + (x - cx) * 0.3, cy + (y - cy) * 0.3); ctx.stroke();
+      $("oAng").textContent = `${theta.toFixed(0)}°`;
+      $("oSide").textContent = theta > 90 ? "shaded" : "lit";
+      return [x, y];
+    });
+    let last = 0;
+    animate($("orbitCanvas"), (dt) => {
+      if (!$("oRun").checked) return;
+      t += dt * 4;
+      fig.paint();
+      const [W, H] = fig.size();
+      const r = Math.min(W, H) * 0.36, light = -Math.PI * 0.75;
+      const theta = MID + SWING * Math.sin((t * 2 * Math.PI) / 40), side = Math.cos(t * 0.13) >= 0 ? 1 : -1;
+      const a = light + (side * theta * Math.PI) / 180, d = r * (0.94 + 0.04 * Math.sin(t * 0.11));
+      if (t - last > 0.25) { trail.push([W * 0.5 + Math.cos(a) * d, H * 0.55 + Math.sin(a) * d]); if (trail.length > 160) trail.shift(); last = t; }
+    });
+  }
+})();
+</script>
+</body>
+</html>
