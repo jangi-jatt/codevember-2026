@@ -372,7 +372,20 @@ controls.target.set(0, 0, 0);
 controls.dampingFactor = 0.05;
 controls.minDistance = 1.8;
 controls.maxDistance = 9;
-onResize((w, h, dpr) => pipeline.setSize(w, h, dpr));
+// On a square or tall screen, several colonies spread wider than the default view: the camera pulls back to fit them
+// (at load and when the screen turns), and can zoom out that far.
+function fitView() {
+  const halfFov = Math.min(camera.fov, (2 * Math.atan(Math.tan((camera.fov * Math.PI) / 360) * camera.aspect) * 180) / Math.PI) * (Math.PI / 360);
+  const distance = Math.max(5.6, (params.colonies() > 1 ? 2.4 : 1.5) / Math.sin(halfFov));
+  controls.maxDistance = Math.max(9, distance * 1.4);
+  _fit.copy(camera.position).sub(controls.target);
+  if (_fit.length() < distance) camera.position.copy(controls.target).addScaledVector(_fit.normalize(), distance);
+}
+const _fit = new Vector3();
+onResize((w, h, dpr) => {
+  pipeline.setSize(w, h, dpr);
+  fitView();
+});
 
 onRandomize(() => {
   // The look on screen before the change, for each spore to change from on its own schedule.
@@ -387,6 +400,7 @@ onRandomize(() => {
   if (recording) record("#", getSeed());
 });
 applyUrlState();
+fitView();
 
 // Lighting: crisp grain shadows, short crevice AO so the folds go dark.
 globalUniforms.shadowLightSize.value = 0.05;
