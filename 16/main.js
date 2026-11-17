@@ -143,9 +143,9 @@ const studio = load.studio.track(
 );
 
 const gui = new GUI(setDay(), document.querySelector("#gui-container"), { expanded: false });
-gui.addSection("Colony");
-gui.addSlider("Spores", params.spores, 10000, MAX_SPORES, 1000, { randomizable: false });
-gui.addSlider("Size", params.size, 0.5, 2, 0.01, { randomizable: false });
+// The panel, by what each setting does. The randomized controls keep their order (seeds replay them in turn).
+// Look: the colony's colours and its grains.
+gui.addSection("Look");
 gui.addSelect("Palette", params.palette, Object.keys(PALETTES)).randomize = () => {
   const weights = { pollen: 4, saffron: 2, rust: 2, lichen: 1.5, coral: 1.5, frost: 1, ultraviolet: 1, verdigris: 1 };
   delete weights[params.palette()];
@@ -153,25 +153,17 @@ gui.addSelect("Palette", params.palette, Object.keys(PALETTES)).randomize = () =
   for (const [k, w] of Object.entries(weights)) if ((r -= w) < 0) return params.palette.set(k);
 };
 gui.addSlider("Crust", params.crust, 0, 1, 0.01).randomize = () => params.crust.set(round(0.4 + 0.3 * Math.random()));
-// A warm halo behind the colony.
 gui.addSlider("Translucency", params.translucency, 0, 1, 0.01, { randomizable: false });
 gui.addSlider("Detail", params.detail, 0, 1, 0.01, { randomizable: false });
-gui.addSlider("Halo", params.halo, 0, 3, 0.01, { randomizable: false });
 // Studio: the colony in colour under a warm key. Microscope: an electron micrograph (grey, edge-lit, ornamented spores,
-// shallow focus, a scale bar).
-// The studio/microscope look is hidden for now (params.look stays studio).
+// shallow focus, a scale bar). Hidden for now (params.look stays studio).
 // gui.addSegmented("Look", params.look, ["studio", "microscope"], { randomizable: false });
-// Air and light: a beam of the key light through the haze (the colony casts shafts in it), and dust hanging in the air.
-gui.addSlider("Beam", params.beam, 0, 3, 0.01, { randomizable: false });
-gui.addSlider("Haze", params.haze, 0, 2, 0.01, { randomizable: false });
-gui.addSlider("Dust", params.dust, 0, 3, 0.01, { randomizable: false });
-gui.addSection("Physics");
-// How fast the current changes, and how hard it stirs.
-// Colonies: one, or two or three that drift apart, meet, merge and split again.
-// Wildness sets the colony's physics in one go: calm (a slow, rounded blob that barely pulses) through the usual
-// colony to wild (a strong, coarse current against weak cohesion and pressure, held by tough bonds, so the mass
+
+// Colony: what it is. Wildness sets its physics in one go: calm (a slow, rounded blob that barely pulses) through the
+// usual colony to wild (a strong, coarse current against weak cohesion and pressure, held by tough bonds, so the mass
 // stretches out into arms, pulsing, budding and bursting more). Randomizing alternates a calmer and a wilder colony;
 // on each side, most land near the middle and few at the extremes.
+gui.addSection("Colony");
 const WILD = {
   calm: { turbulence: 0.6, scale: 1.3, cohesion: 1.4, pressure: 1.2, bonds: 1, tear: 0.6, flow: 0.45, breathe: 0.2, sporulation: 0.4, budding: 0.4 },
   usual: { turbulence: 1.3, scale: 0.95, cohesion: 0.9, pressure: 0.9, bonds: 1.2, tear: 0.4, flow: 0.75, breathe: 0.45, sporulation: 1, budding: 1 },
@@ -192,46 +184,67 @@ function randomWildness() {
   return round(wildSide ? 0.5 + d : 0.5 - d);
 }
 gui.addSlider("Wildness", params.wildness, 0, 1, 0.01, { onChange: (v) => applyWildness(v, false) }).randomize = () => params.wildness.set(randomWildness());
-// Several colonies always go back to one before the next split, so a change never goes from two straight to three.
+// One, or two or three that drift apart, meet, merge and split again; several always go back to one before the next
+// split, so a change never goes from two straight to three.
 gui.addSlider("Colonies", params.colonies, 1, 3, 1).randomize = () => params.colonies.set(params.colonies() > 1 ? 1 : Math.random() < 0.45 ? 1 : Math.random() < 0.6 ? 2 : 3);
 // How much spores drift toward their own colour: 0 lets the stirring mix them freely, higher gathers the colours into
 // patches and streams (never fully apart).
 gui.addSlider("Sorting", params.sorting, 0, 2, 0.01).randomize = () => params.sorting.set(round(0.3 + 0.7 * Math.random()));
-// How fast the whole simulation runs (everything: motion, current, breathing, buds, bursts).
+gui.addSlider("Spores", params.spores, 10000, MAX_SPORES, 1000, { randomizable: false });
+gui.addSlider("Size", params.size, 0.5, 2, 0.01, { randomizable: false });
+
+// Motion: the clocks, and the current that folds the mass.
+gui.addSection("Motion");
+// How fast the physics runs, and so anything done to the colony.
 gui.addSlider("Speed", params.speed, 0.1, 2, 0.01, { randomizable: false });
-// The colony's own life (current, pulses, buds, bursts, colonies circling) runs at Pace; the physics, and so anything
-// done to it, at Speed.
+// How fast the colony's own life runs (current, pulses, buds, bursts, colonies circling).
 gui.addSlider("Pace", params.pace, 0.05, 1, 0.01, { randomizable: false });
+// How fast the current changes, how hard it stirs, and how big its swirls are.
 gui.addSlider("Flow", params.flow, 0, 2, 0.01, { randomizable: false });
 gui.addSlider("Turbulence", params.turbulence, 0, 3, 0.01).randomize = () => params.turbulence.set(round(0.7 + 0.8 * Math.random()));
 gui.addSlider("Scale", params.scale, 0.4, 2.5, 0.01).randomize = () => params.scale.set(round(0.8 + 0.6 * Math.random()));
-// What holds the mass together (goo), the bead clumps (bonds), what stops it packing (pressure), and how thick the
+
+// Body: what holds the mass together (goo), the bead clumps (bonds) and how easily they tear (their bonds snap when
+// stretched, and grow back when the pieces meet again), what stops it packing (pressure, collisions), and how thick the
 // medium it floats in is (drag).
+gui.addSection("Body");
 gui.addSlider("Cohesion", params.cohesion, 0, 3, 0.01).randomize = () => params.cohesion.set(round(0.7 + 0.6 * Math.random()));
 gui.addSlider("Bonds", params.bonds, 0, 3, 0.01).randomize = () => params.bonds.set(round(0.6 + 0.8 * Math.random()));
-gui.addSlider("Pressure", params.pressure, 0.2, 3, 0.01, { randomizable: false });
-gui.addSlider("Drag", params.drag, 0.1, 3, 0.01, { randomizable: false });
-gui.addSlider("Disrupt", params.disrupt, 0, 3, 0.01, { randomizable: false });
-// How easily clumps tear apart (their bonds snap when stretched, and grow back when the pieces meet again).
 gui.addSlider("Tear", params.tear, 0, 1, 0.01).randomize = () => params.tear.set(round(0.3 + 0.5 * Math.random()));
-// How hard a click blows a puff of spores out.
-gui.addSlider("Puff", params.puff, 0, 3, 0.01, { randomizable: false });
-// Engorgement: how strongly (and a little how often) the colony swells in sudden, irregular pulses.
-gui.addSlider("Pulse", params.breathe, 0, 1, 0.01).randomize = () => params.breathe.set(round(0.2 + 0.6 * Math.random()));
-// Spores pushing each other apart where they would overlap.
+gui.addSlider("Pressure", params.pressure, 0.2, 3, 0.01, { randomizable: false });
 gui.addSlider("Collisions", params.collisions, 0, 3, 0.01, { randomizable: false });
-// How often a patch of ripe crust bursts in a puff of spores (they grow back beside clump-mates).
+gui.addSlider("Drag", params.drag, 0.1, 3, 0.01, { randomizable: false });
+
+// Life: how strongly the colony swells in sudden, irregular pulses; how often a patch of ripe crust bursts in a puff of
+// spores (they grow back beside clump-mates); how often it buds (a lobe swells, pinches off, floats away and comes back).
+gui.addSection("Life");
+gui.addSlider("Pulse", params.breathe, 0, 1, 0.01).randomize = () => params.breathe.set(round(0.2 + 0.6 * Math.random()));
 gui.addSlider("Sporulation", params.sporulation, 0, 4, 0.01).randomize = () => params.sporulation.set(round(0.5 + 1.5 * Math.random()));
-// How often the colony buds: a lobe swells, pinches off, floats away and comes back.
 gui.addSlider("Budding", params.budding, 0, 3, 0.01).randomize = () => params.budding.set(round(0.5 + 1.5 * Math.random()));
-gui.addSection("View");
-// Motion blur, off by default: the shutter as a fraction of the frame (0.5 is a film camera's 180 degrees).
+
+// Touch: how hard hovering stirs the spores, and how hard a click blows a puff of them out.
+gui.addSection("Touch");
+gui.addSlider("Disrupt", params.disrupt, 0, 3, 0.01, { randomizable: false });
+gui.addSlider("Puff", params.puff, 0, 3, 0.01, { randomizable: false });
+
+// Light & air: a warm halo behind the colony, a beam of the key light through the haze (the colony casts shafts in it),
+// and dust hanging in the air.
+gui.addSection("Light & air");
+gui.addSlider("Halo", params.halo, 0, 3, 0.01, { randomizable: false });
+gui.addSlider("Beam", params.beam, 0, 3, 0.01, { randomizable: false });
+gui.addSlider("Haze", params.haze, 0, 2, 0.01, { randomizable: false });
+gui.addSlider("Dust", params.dust, 0, 3, 0.01, { randomizable: false });
+
+// Camera: depth of field and where it focuses, how fast the idle camera orbits, reframes and pulls focus, motion blur
+// (the shutter as a fraction of the frame; 0.5 is a film camera's 180 degrees), and the colony's spin.
+gui.addSection("Camera");
 gui.addSlider("Depth of field", params.focusBlur, 0, 1, 0.01, { randomizable: false });
 gui.addSlider("Focus", params.focus, -1, 1, 0.01, { randomizable: false });
-// How fast the idle camera orbits, reframes and pulls focus.
 gui.addSlider("Camera speed", params.cameraSpeed, 0.2, 3, 0.01, { randomizable: false });
 gui.addSlider("Motion blur", params.blur, 0, 1, 0.01, { randomizable: false });
 gui.addSlider("Spin", params.spin, 0, 1, 0.01, { randomizable: false });
+
+gui.addSection("Auto change");
 // Auto change counts toward the next colony only once the last change has mostly settled.
 const autoChange = createAutoChange({ enabled: params.auto, every: params.autoTime, gui, ready: () => changeSettled() });
 function changeSettled() {
