@@ -238,13 +238,22 @@ beatMap.then((map) => {
 }, (e) => console.warn("no beat map", e));
 // The intro: the card fades in out of the dark, then the tunnel lights up as the music starts. It waits for the music
 // (or for sound to be switched off, or for it to fail); recordings and replayed moments start fully lit.
-const quickStart = new URLSearchParams(location.search).has("capture") || new URLSearchParams(location.search).has("state");
+// ?intro keeps the intro in a recording.
+const quickStart = (new URLSearchParams(location.search).has("capture") && !new URLSearchParams(location.search).has("intro")) || new URLSearchParams(location.search).has("state");
 const intro = { card: quickStart ? 1 : 0, tunnel: quickStart ? 1 : 0, lit: quickStart };
 let musicFailed = false;
 music.loaded.catch(() => (musicFailed = true));
 function updateIntro(dt) {
   // Frames, not the time since load: the first frame's dt can span the whole load.
   dt = Math.min(dt, 1 / 30);
+  // The outro (recordings ask for it): the tunnel goes dark, then the card fades out.
+  if (intro.out) {
+    intro.tunnel = Math.max(0, intro.tunnel - dt / 2.5);
+    if (intro.tunnel <= 0) intro.card = Math.max(0, intro.card - dt / 1.8);
+    pipeline.exposure = intro.card * intro.card * (3 - 2 * intro.card);
+    tunnel.uniforms.tunnelLight.value = (intro.tunnel * intro.tunnel * (3 - 2 * intro.tunnel)) ** 2;
+    return;
+  }
   // Exposure only while fading in, so the panel's slider still works after.
   if (intro.card < 1) {
     intro.card = Math.min(1, intro.card + dt / 1.8);
@@ -648,6 +657,8 @@ window.app = {
   // For recordings: the song (its clock can be driven), and the next card by hand.
   music,
   nextCard,
+  // The intro in reverse, over 4.3 s: the tunnel goes dark, then the card fades out.
+  outro: () => (intro.out = true),
   // tools/perf times these as their own segments.
   perfSegments: (wrap) => {
     wrap(diorama, "render", "diorama");
