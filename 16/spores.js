@@ -26,6 +26,7 @@ import {
   Float32BufferAttribute,
   InstancedBufferGeometry,
   PlaneGeometry,
+  BoxGeometry,
   CustomBlending,
   AddEquation,
   OneFactor,
@@ -41,6 +42,15 @@ const SIZE = 512;
 // Update passes per simulation step (?substeps=2 for the old two, to compare). With one, drag is scaled to match two's
 // motion and tearing (measured: spore speeds and intact bonds within a few percent).
 const SUBSTEPS = Math.max(1, Math.round(Number(new URLSearchParams(location.search).get("substeps")) || 1));
+// ?shape=cube draws every spore as a small cube (real geometry, flat faces) instead of the sphere impostor.
+const CUBES = new URLSearchParams(location.search).get("shape") === "cube";
+// ?shapes=morph makes the colony take a shape and change it, forever, through all of SHAPE_NAMES; ?shapes=cube (or any
+// other name in the list) holds one.
+const SHAPE_NAMES = ["pyramid", "ball", "cube", "cuboid", "tetrahedron", "octahedron", "cylinder", "cone", "prism", "torus"];
+const SHAPES_MODE = new URLSearchParams(location.search).get("shapes");
+const SHAPES = SHAPES_MODE === "morph" || SHAPE_NAMES.includes(SHAPES_MODE);
+const SHAPE_HOLD_TIME = 3;
+const SHAPE_MORPH_TIME = 1.5;
 const ONE_PASS_DRAG = 0.875;
 const MAX_SPORES = SIZE * SIZE;
 // Density grid: G³ cells over a box of half-size BOX, as TILES x TILES slices in an ATLAS² texture.
@@ -415,6 +425,11 @@ uniform vec3 sporeDir;
 uniform float sporeCone;
 uniform float sporeChance;
 uniform float stepId;
+uniform float pointerBoost;
+uniform float shapeFrom;
+uniform float shapeTo;
+uniform float shapeMorph;
+uniform float shapeHold;
 uniform vec3 budDir;
 uniform vec3 budCentre;
 uniform float budNeck;
@@ -506,6 +521,65 @@ vec2 state(vec3 p) {
   return vec2(max(f.x - restAt(p), 0.0), f.y);
 }
 
+// The colony's container when it is made to take a shape (?shapes=morph): a list of solids of about the same volume,
+// each the inside of a signed distance (negative inside, so the largest of a few planes' distances for a flat-sided
+// one). shapeFrom and shapeTo pick two of them and shapeMorph blends from one to the other. The ids match SHAPE_NAMES.
+float sdBox(vec3 p, vec3 h) {
+  vec3 q = abs(p) - h;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
+float sdShape(int id, vec3 p) {
+  if (id == 0) {
+    // Square pyramid, base down, 1.85 wide and tall, its middle (half way up) at the centre of the screen. Each side
+    // plane is 2|x| + y = 1 for a unit pyramid.
+    vec3 q = (p + vec3(0.0, 0.5 * 1.85, 0.0)) / 1.85;
+    return max(-q.y, max(2.0 * abs(q.x) + q.y - 1.0, 2.0 * abs(q.z) + q.y - 1.0) * 0.4472136) * 1.85;
+  }
+  if (id == 1) return length(p) - 0.82;
+  if (id == 2) return sdBox(p, vec3(0.65));
+  if (id == 3) return sdBox(p, vec3(1.0, 0.6, 0.46));
+  if (id == 4) {
+    // Regular tetrahedron: four faces, normals (1,1,1), (1,-1,-1), (-1,1,-1), (-1,-1,1), inradius 0.54.
+    float d = max(max(p.x + p.y + p.z, p.x - p.y - p.z), max(-p.x + p.y - p.z, -p.x - p.y + p.z));
+    return d * 0.57735027 - 0.54;
+  }
+  if (id == 5) return (abs(p.x) + abs(p.y) + abs(p.z) - 1.18) * 0.57735027;
+  if (id == 6) {
+    vec2 d = vec2(length(p.xz) - 0.7, abs(p.y) - 0.71);
+    return min(max(d.x, d.y), 0.0) + length(max(d, 0.0));
+  }
+  if (id == 7) {
+    // Cone, base down, radius 1.15 and 1.59 tall (the same volume as the rest), its middle (half way up) at the centre
+    // of the screen, and a full point.
+    float y = p.y + 0.5 * 1.59;
+    float side = (length(p.xz) * 1.59 + y * 1.15 - 1.15 * 1.59) * 0.5097;
+    return max(-y, side);
+  }
+  if (id == 8) {
+    // Equilateral triangular prism, along z: the triangle's three sides are at distance 0.49 from its centre.
+    float t = max(p.y, max(-0.8660254 * p.x - 0.5 * p.y, 0.8660254 * p.x - 0.5 * p.y)) - 0.49;
+    return max(t, abs(p.z) - 0.88);
+  }
+  vec2 w = vec2(length(p.xz) - 0.8, p.y);
+  return length(w) - 0.373;
+}
+float shapeSdf(vec3 p) {
+  int from = int(shapeFrom + 0.5);
+  if (shapeMorph <= 0.0) return sdShape(from, p);
+  return mix(sdShape(from, p), sdShape(int(shapeTo + 0.5), p), shapeMorph);
+}
+
+// How much the pointer has hold of a spore (0..1): under it, on the colony's near side, while it is pushing.
+// A spore the pointer has gets away from the shape; the shape takes it back once the pointer lets go.
+float pointerGrip(vec3 p) {
+  vec3 toP = p - rayOrigin;
+  vec3 radial = toP - dot(toP, rayDir) * rayDir;
+  float dr = length(radial);
+  float alongP = dot(toP, rayDir) - dot(-rayOrigin, rayDir);
+  float w = exp(-dr * dr / (pointerRadius * pointerRadius)) * (1.0 - smoothstep(-0.3, 0.2, alongP));
+  return clamp(w * pointerForce * 2.0, 0.0, 1.0);
+}
+
 void main() {
   ivec2 texel = ivec2(gl_FragCoord.xy);
   int index = texel.x + texel.y * SIZE;
@@ -581,6 +655,17 @@ void main() {
     float tl = length(tgt);
     force += grabPull * tgt * min(1.0, 0.6 / max(tl, 1e-4));
   } else force += bud > 0.5 ? budPull * (budCentre - p) : centering * (colonies > 1.5 ? 2.5 + 4.0 * transit : 1.0) * (colonyCentre - p);
+  // Made to take a shape: outside the container, pushed back in along its surface normal.
+  if (shapeHold > 0.0) {
+    float sd0 = shapeSdf(p);
+    if (sd0 > 0.0) {
+      vec2 e = vec2(0.01, 0.0);
+      vec3 g = vec3(shapeSdf(p + e.xyy) - shapeSdf(p - e.xyy), shapeSdf(p + e.yxy) - shapeSdf(p - e.yxy), shapeSdf(p + e.yyx) - shapeSdf(p - e.yyx));
+      // Stiff near the surface, gentle for a spore well outside it (so it flies and comes back, not snaps), and none
+      // where the pointer has hold of it.
+      force -= (shapeHold * min(sd0, 0.05) + 8.0 * max(sd0 - 0.05, 0.0)) * (1.0 - pointerGrip(p)) * normalize(g + 1e-6);
+    }
+  }
   // The attractor: spores within reach are drawn in, swirling round the pointer's ray.
   if (attract > 0.0) {
     vec3 ta = attractPoint - p;
@@ -632,7 +717,7 @@ void main() {
   // Only the near side of the colony (the part the pointer is over), not everything down the ray.
   float alongP = dot(toP, rayDir) - dot(-rayOrigin, rayDir);
   float w = exp(-dr * dr / (pointerRadius * pointerRadius)) * (1.0 - smoothstep(-0.3, 0.2, alongP));
-  vec3 push = pointerForce * w * (rayVel * 3.0 + radial / max(dr, 1e-4));
+  vec3 push = pointerForce * pointerBoost * w * (rayVel * 3.0 + radial / max(dr, 1e-4));
   force += push;
 
   // Released spores feel only the current and the pointer, and float off.
@@ -698,6 +783,21 @@ void main() {
   // The swell itself: while a pulse fills, the mass expands from its colony's centre (more on the pulse's side), and
   // shrinks back as it sags; the lowered rest density then holds it. Radius changes ~15% per unit of pulse.
   if (age < 0.6) p += (p - gCentre) * (0.15 * pulseRate * dt * pulseSide(p));
+
+  // Made to take a shape, strictly: a spore that ends up outside the container is put back on its surface, and loses the
+  // velocity that was carrying it out. The force above only leans on the mass; this is the wall.
+  if (shapeHold > 0.0) {
+    float sd1 = shapeSdf(p);
+    if (sd1 > 0.0) {
+      vec2 e = vec2(0.01, 0.0);
+      vec3 g = normalize(vec3(shapeSdf(p + e.xyy) - shapeSdf(p - e.xyy), shapeSdf(p + e.yxy) - shapeSdf(p - e.yxy), shapeSdf(p + e.yyx) - shapeSdf(p - e.yyx)) + 1e-6);
+      // Put back on the surface, but a spore far outside (blown off by the pointer) is brought back at a limited speed,
+      // and keeps its velocity, so it is seen getting away and returning.
+      float grip = pointerGrip(p);
+      p -= g * min(sd1, mix(10.0, 0.0, grip) * dt + 0.02 * (1.0 - grip));
+      v -= g * max(dot(v, g), 0.0) * (1.0 - smoothstep(0.04, 0.12, sd1)) * (1.0 - grip);
+    }
+  }
 
   outPos = vec4(p, P.w);
   // How near the surface the spore sits (1 at the skin, 0 deep inside; released spores are in the open), for ambient
@@ -947,6 +1047,11 @@ function createSpores(renderer, random) {
     sporeCone: { value: 0.98 },
     sporeChance: { value: 0 },
     stepId: { value: 0 },
+    pointerBoost: { value: 1 },
+    shapeFrom: { value: 0 },
+    shapeTo: { value: 0 },
+    shapeMorph: { value: 0 },
+    shapeHold: { value: 0 },
     budDir: { value: new Vector3(1, 0, 0) },
     budCentre: { value: new Vector3() },
     budNeck: { value: 0.6 },
@@ -976,7 +1081,7 @@ function createSpores(renderer, random) {
 
   // Impostor spheres: one camera-facing quad each, shaded as a sphere (an 80-triangle sphere a few pixels wide is all
   // sub-pixel triangles, which the rasterizer handles very badly).
-  const quadShape = new PlaneGeometry(2, 2);
+  const quadShape = CUBES ? new BoxGeometry(2, 2, 2) : new PlaneGeometry(2, 2);
   const geometry = new InstancedBufferGeometry();
   geometry.index = quadShape.index;
   for (const name of ["position", "normal", "uv"]) geometry.setAttribute(name, quadShape.getAttribute(name));
@@ -1016,7 +1121,7 @@ function createSpores(renderer, random) {
   };
   const material = new PipelineMaterial({
     uniforms,
-    varyings: { vSpore: "vec4", vQuad: "vec2", vAxis: "vec3", vPix: "float", vColony: "float", vLit: "float", vThrough: "float", vChange: "float", vColonyPrev: "float", vColonyChange: "float" },
+    varyings: { vSpore: "vec4", vQuad: "vec2", vAxis: "vec3", vPix: "float", vColony: "float", vLit: "float", vThrough: "float", vChange: "float", vColonyPrev: "float", vColonyChange: "float", vFace: "vec3" },
     vertexPars: /* glsl */ `
       uniform sampler2D tPos;
       uniform sampler2D tVel;
@@ -1080,6 +1185,7 @@ function createSpores(renderer, random) {
           // Crust shade: the spore's own, deepened where it sits among dark grains.
           vSpore = vec4(yellow, clamp(0.6 * meta.w + 0.8 * (1.0 - share) - 0.15, 0.0, 1.0), h, shallowness);
           vQuad = p.xy;
+          vFace = normalize(mat3(modelMatrix) * n);
         }
         // Spores are a little oval, each along its own axis (seen in the view plane, which is enough at this size); more
         // so under the microscope.
@@ -1120,6 +1226,7 @@ function createSpores(renderer, random) {
           vPix = pix;
           vChange = change;
         }
+        if (${CUBES}) return d.xyz + p * s * 0.8;
         return centre + (right * qs.x + up * qs.y) * s;
       }
     `,
@@ -1168,7 +1275,7 @@ function createSpores(renderer, random) {
     `,
     surface: /* glsl */ `
       void surface(inout Surface s) {
-        float r2 = dot(vQuad, vQuad);
+        float r2 = ${CUBES} ? 0.0 : dot(vQuad, vQuad);
         if (r2 > 1.0) discard;
         vec3 right = vec3(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
         vec3 up = vec3(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
@@ -1179,12 +1286,14 @@ function createSpores(renderer, random) {
         vec2 n2 = ax * (dot(vQuad, ax) / vAxis.z) + perp * dot(vQuad, perp);
         float nz = sqrt(1.0 - r2);
         s.normal = normalize(right * n2.x + up * n2.y + back * nz);
+        // A cube: flat faces (no ornament), the face's own normal.
+        if (${CUBES}) s.normal = normalize(vFace);
         float c = vSpore.x;
         // The grain's surface ornament (a net on crust grains, spines on the dark ones, and a furrow along the crust
         // grain's length), as a bump where the grain is big enough to show it; strongest under the microscope.
         float relief = 0.0;
         float furrow = 0.0;
-        float bump = max(microscope, 0.8 * detail) * ornament * smoothstep(4.0, 9.0, vPix);
+        float bump = ${CUBES} ? 0.0 : max(microscope, 0.8 * detail) * ornament * smoothstep(4.0, 9.0, vPix);
         // Only where a grain is big enough on screen to show it (it's the costliest part of the shading).
         if (bump > 0.02) {
           float a = 6.2831853 * vSpore.z;
@@ -1326,6 +1435,7 @@ function createSpores(renderer, random) {
   }
 
   // Advances the simulation by dt (substeps share one density grid). dt = 0 (paused) leaves it as it is.
+  let shapeClock = 0;
   function step(dt, time, flowTime, substeps = SUBSTEPS) {
     const grain = uniforms.sporeSize.value;
     const prevTarget = renderer.getRenderTarget();
@@ -1374,6 +1484,21 @@ function createSpores(renderer, random) {
       simUniforms.dt.value = h;
       simUniforms.time.value = time;
       simUniforms.flowTime.value = flowTime;
+      if (SHAPES) {
+        // Each shape held, then morphed into the next, and round again.
+        shapeClock += dt;
+        const period = SHAPE_HOLD_TIME + SHAPE_MORPH_TIME;
+        const k = Math.floor(shapeClock / period);
+        const u = shapeClock - k * period;
+        const ease = (x) => x * x * (3 - 2 * x);
+        const fixed = SHAPE_NAMES.indexOf(SHAPES_MODE);
+        const from = fixed >= 0 ? fixed : k % SHAPE_NAMES.length;
+        simUniforms.shapeFrom.value = from;
+        simUniforms.shapeTo.value = fixed >= 0 ? fixed : (k + 1) % SHAPE_NAMES.length;
+        simUniforms.shapeMorph.value = fixed >= 0 || u < SHAPE_HOLD_TIME ? 0 : ease((u - SHAPE_HOLD_TIME) / SHAPE_MORPH_TIME);
+        simUniforms.shapeHold.value = 300;
+        simUniforms.pointerBoost.value = 3;
+      }
       for (let i = 0; i < substeps; i++) {
         simUniforms.tPos.value = sims[current].textures[0];
         simUniforms.tVel.value = sims[current].textures[1];

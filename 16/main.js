@@ -347,6 +347,8 @@ renderer.domElement.addEventListener("pointerleave", () => (pointer.inside = fal
 // Pressing on a colony: a quick click puffs spores out; dragging pulls a handful out (they follow the pointer, the
 // mass stretches after them and tears); the right button (or a long press on touch) gathers spores in toward the
 // pointer and throws them back out on release. Pressing on the background orbits as usual.
+// ?drag=orbit: a left drag that starts on the colony orbits like one that starts on the background (a quick click still puffs).
+const DRAG_ORBITS = query.get("drag") === "orbit";
 const press = { active: false, x: 0, y: 0, t: 0, mode: null, depth: 0, ndc: new Vector2(), charge: 0, longPress: 0 };
 let puffPending = null;
 const toNdc = (e, out) => {
@@ -394,7 +396,7 @@ renderer.domElement.addEventListener(
     if (e.button === 2) {
       press.mode = "attract";
       controls.enabled = false;
-    } else if (e.button === 0 && hit) {
+    } else if (e.button === 0 && hit && !DRAG_ORBITS) {
       // A click or a drag; which one is decided when it moves.
       press.mode = "press";
       press.depth = hit.t;
