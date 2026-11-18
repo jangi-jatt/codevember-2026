@@ -49,8 +49,8 @@ createStudioEnvironment(renderer, {
 });
 
 pipeline.background.setRGB(0.006, 0.007, 0.009);
-setDay();
-document.title = "Shatter on glass · test";
+setDay(NaN); // (this folder's name would make it day 2, with day 2's nav and explainer link: it has neither)
+document.title = "Shatter 2.2 · Codevember 2026";
 const gui = new GUI("Shatter on glass", document.querySelector("#gui-container"), { expanded: false });
 gui.addSlider("Explosion", params.explosion, 0, 1, 0.01, { randomizable: false });
 gui.addSlider("Chips", params.spray, 0, 1, 0.01, { randomizable: false });
